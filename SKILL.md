@@ -66,6 +66,7 @@ tts_gemini 走 PowerShell 並注入金鑰（agent 的工具環境常讀不到使
 | 使用者原話像… | 把手 | 處方方向 |
 |---|---|---|
 | 像大陸腔／捲舌／兒化／不像台灣人 | voice | 改音色描述句重建；退路：底色加 `Taiwanese Mandarin accent` |
+| 音調太低／太高（一點點） | 後製 | style 句 `slightly higher pitch` 實測推不動 f0；用 `ffmpeg -i in.mp3 -af "rubberband=pitch=1.0595:formant=preserved" out.mp3`（+1 半音；-1 半音 0.9439），0 請求、節奏不動；差很多才重寫描述重建 |
 | 太平／像念經／像播音員／尾音拖／太快太慢／沒感情 | style | 底色或該段 style 換**一個**短語（≤3 個形容詞） |
 | 唸錯字／太書面／不像人講話／數字怪 | text | 替換表加一組 `原→替`、數字寫中文數字、句子拆逗號 |
 | 停頓怪／接太快／斷在奇怪的地方 | cue | 【停 X】位置或 `<breath>`；**句間要拖長→後製** `python scripts\stretch_pauses.py --in rNN.mp3 --out rNN+1.mp3 --add 0.35 --min 0.5`（0 請求；行內 `<short pause>` 實測對空白長度無效） |

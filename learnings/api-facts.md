@@ -14,6 +14,7 @@
 | **flash 兩段 one-request 可能把最後一段唸兩遍** | 作者同一稿（2 段＋【停 1.0】）連續 2/2 重複；lite 同請求不重複；單段 `--file`＋行內 `<long pause>` 在 flash 乾淨 | whisper 逐段時間軸比對 | 2026-10-05 |
 | 行內 `<short pause>` 加在每個句號後，**句間空白長度沒有可量測變化**（lite） | silencedetect 比對：句間空白都 0.5~1.3 s，總長幾乎相同；flash 未驗 | ffmpeg silencedetect | 2026-10-05 |
 | 句間停頓要「拖一點點」用後製 `scripts/stretch_pauses.py` 最準（0 請求） | 每個 ≥0.5 s 空白中點插固定秒數，語氣不動；作者實測 +0.6 s 剛好 | 自檢＋實作 | 2026-10-05 |
+| style 句 `slightly higher pitch` **推不動音高**（flash、prompted 音色） | 作者實測 f0 中位 190→186 Hz，反而節奏變快；音高用 ffmpeg `rubberband=pitch=…:formant=preserved` 後製（+1 半音 190→200 Hz，長度不變） | numpy 自相關粗估 f0 | 2026-10-05 |
 | prompted 音色的 `sample_audio` 是**英文示範句**（即使 language_code=cmn-TW） | 約 15 s 英文；判腔／判語言要用 lite 唸中文稿，別拿 sample 當中文試聽 | whisper 轉錄（lang=en） | 2026-10-05 |
 | voices.create 吃不吃 flash 10 發 | 待 flash 鎖死日 probe | | |
 | 400 被拒吃不吃額度 | 假設不吃，待 probe 當天觀察 | | |
