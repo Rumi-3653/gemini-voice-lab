@@ -68,7 +68,7 @@ tts_gemini 走 PowerShell 並注入金鑰（agent 的工具環境常讀不到使
 | 像大陸腔／捲舌／兒化／不像台灣人 | voice | 改音色描述句重建；退路：底色加 `Taiwanese Mandarin accent` |
 | 太平／像念經／像播音員／尾音拖／太快太慢／沒感情 | style | 底色或該段 style 換**一個**短語（≤3 個形容詞） |
 | 唸錯字／太書面／不像人講話／數字怪 | text | 替換表加一組 `原→替`、數字寫中文數字、句子拆逗號 |
-| 停頓怪／接太快／斷在奇怪的地方 | cue | 【停 X】位置或 `<short pause>`／`<breath>` |
+| 停頓怪／接太快／斷在奇怪的地方 | cue | 【停 X】位置或 `<breath>`；**句間要拖長→後製** `python scripts\stretch_pauses.py --in rNN.mp3 --out rNN+1.mp3 --add 0.35 --min 0.5`（0 請求；行內 `<short pause>` 實測對空白長度無效） |
 | 跟上次不一樣／怎麼變了 | 漂移 | 0 額度：比 voice id、styles.txt 字數、基準稿有沒有被改 |
 
 聽不懂的評語（「怪怪的」）先問一個二選一（腔？速度？字？）再花額度；一句含兩件事拆兩輪。
