@@ -11,5 +11,7 @@
 | stored voice TTL | 不活動 1 年，合成即延 expire_time；超過專案上限（200）回 RESOURCE_EXHAUSTED | 官方 voice-design 頁 | 2026-10-05 |
 | **voices.create 免費層可用** | 是：`voices.py probe` 建 prompted 音色成功（exit 0），自動刪除後 list 為空 | voices.py probe | 2026-10-05 |
 | voices.create 接受的 language_code | `cmn-TW` 第一個就被接受（其餘候選未試） | voices.py probe | 2026-10-05 |
+| **flash 兩段 one-request 可能把最後一段唸兩遍** | 作者同一稿（2 段＋【停 1.0】）連續 2/2 重複；lite 同請求不重複；單段 `--file`＋行內 `<long pause>` 在 flash 乾淨 | whisper 逐段時間軸比對 | 2026-10-05 |
+| prompted 音色的 `sample_audio` 是**英文示範句**（即使 language_code=cmn-TW） | 約 15 s 英文；判腔／判語言要用 lite 唸中文稿，別拿 sample 當中文試聽 | whisper 轉錄（lang=en） | 2026-10-05 |
 | voices.create 吃不吃 flash 10 發 | 待 flash 鎖死日 probe | | |
 | 400 被拒吃不吃額度 | 假設不吃，待 probe 當天觀察 | | |
