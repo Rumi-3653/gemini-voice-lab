@@ -21,7 +21,7 @@ Gemini TTS 只有三支把手：**voice**（音色人設／口音，建一次）
 
 當 Claude Code skill 用（也適用其他讀 `SKILL.md` 的 agent）：把整個資料夾放到 `~/.claude/skills/gemini-voice-lab`（資料夾名必須等於 `SKILL.md` 的 `name`），然後說「訓練 Gemini 配音」。
 
-不靠 agent、純手動試跑（在 repo 根執行，Windows 寫法；macOS／Linux 把 `\` 換成 `/`）：
+不靠 agent、純手動試跑（在本 skill 資料夾（repo 根）執行，Windows 寫法；macOS／Linux 把 `\` 換成 `/`、`python` 改 `python3`）：
 
 ```powershell
 # 1. 離線自檢（不需 key、不打 API）

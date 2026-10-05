@@ -13,9 +13,9 @@ description: >-
 
 # gemini-voice-lab
 
-Gemini TTS 只有三支把手：**voice**（人設／口音，建一次）、**style**（每段一句，越短越不漂）、**text**（逐字照唸——用字、語尾、替換字、`<tag>` 都是把手）。這個 skill 做的事就是把使用者的一句評語落到正確的那一支，並把學到的寫進 `learnings/`。合成用本 skill 自帶的 `scripts\tts_gemini.py`（配音譜、風格表、`--one-request`、`--dry-run`、SRT 都在裡面），自建音色用 `scripts\voices.py`；兩支都在 repo 根執行，不需要別的 skill。
+Gemini TTS 只有三支把手：**voice**（人設／口音，建一次）、**style**（每段一句，越短越不漂）、**text**（逐字照唸——用字、語尾、替換字、`<tag>` 都是把手）。這個 skill 做的事就是把使用者的一句評語落到正確的那一支，並把學到的寫進 `learnings/`。合成用本 skill 自帶的 `scripts\tts_gemini.py`（配音譜、風格表、`--one-request`、`--dry-run`、SRT 都在裡面），自建音色用 `scripts\voices.py`；兩支都在本 skill 資料夾（repo 根）執行，不需要別的 skill。
 
-> 路徑與指令以 Windows 寫法呈現（`\`、PowerShell）；macOS／Linux 把 `\` 換成 `/`、金鑰改用 `export GEMINI_API_KEY=…` 即可。
+> 路徑與指令以 Windows 寫法呈現（`\`、PowerShell）；macOS／Linux 把 `\` 換成 `/`、`python` 多半要寫 `python3`、金鑰改用 `export GEMINI_API_KEY=…` 即可。
 
 ## 鐵則
 
