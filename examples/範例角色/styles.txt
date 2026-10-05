@@ -1,0 +1,4 @@
+# r01：底色＝rules.md 目前底色；兩段 preset 依角色「慢語速、敢留白」的設定收斂
+底色: Taiwanese Mandarin, conversational, natural pace, sentence-final particles light, no broadcaster tone
+平穩: calm, soft, unhurried
+收尾: gentle and conclusive, soft landing

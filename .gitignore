@@ -1,0 +1,9 @@
+lab/
+private/
+__pycache__/
+*.pyc
+*.wav
+*.mp3
+*.m4a
+*.flac
+Thumbs.db
