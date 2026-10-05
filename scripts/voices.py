@@ -77,6 +77,9 @@ def _err(e: Exception, attempt: int):
     _handle_api_error(e, attempt)  # 其他 4xx → tts_gemini 一行退出（attempt 固定 1，不會進它的 429 重試分支）
 
 
+_KEEP = []  # 建過的 Client 留著：呼叫端若寫 _call(_client().voices.X)，暫時物件會先被回收、底層連線關閉（"client has been closed"）
+
+
 def _client(api_key=None, **http_options):
     try:
         from google import genai
@@ -86,6 +89,7 @@ def _client(api_key=None, **http_options):
     # SDK 2.27 的 voices 預設對 408/409/429/5xx／連線錯誤重試 3 次；retry_options attempts=0 仍會留 1 次重試
     # （parent 把 0 夾成 1，_gaos 又把它當「重試次數」）→ 直接清掉 voices 的 retry_config。重試 create 可能多建音色而 id 沒印出來。
     c.voices.sdk_configuration.retry_config = None
+    _KEEP.append(c)
     return c
 
 
