@@ -3,7 +3,7 @@ name: gemini-voice-lab
 description: >-
   Gemini 3.8 Flash TTS 配音的「聲音實驗室」：用回合制把雲端配音調成自然的台灣口語——每回合只燒 1 次請求，
   使用者聽完回一句評語（像大陸腔／太平／尾音拖／唸錯字），Claude 歸到 voice／style／text／cue 其中一支把手，
-  查規則庫套處方或開新規則，立刻回寫 learnings；也負責建與管專屬音色（AI Studio 網頁版 Voice design 造角色聲、
+  查規則庫套處方或開新規則，立刻回寫 learnings；也負責建與管專屬音色（voices.py design 用描述造角色聲——免費層可建、
   Voice replication 複製使用者本人聲音、voices.py 列／查／刪／到期重建），角色定案回寫角色設定卡。
   本 skill 為免費層設計（flash 每天約 10 次請求），額度用完切 AI Studio 網頁版備援。
   觸發：「訓練 Gemini 配音」「配音訓練／配音回合／下一回合／上次練到哪」「聲音實驗室」「設計角色聲音／幫角色做專屬音色」
@@ -41,12 +41,12 @@ Gemini TTS 只有三支把手：**voice**（人設／口音，建一次）、**s
   ```
 - 第一個角色：先挑一個沒鎖別家引擎的角色；角色卡若已鎖 ElevenLabs／edge-tts 等，換引擎要使用者明說。
 
-### 造聲（預設走 AI Studio 網頁版；若你有 Google AI Pro，網頁版配額較高，可當造聲入口與備援）
+### 造聲（預設走 API `voices.py design`；AI Studio 網頁版 Voice Design 需付費層 key——免費層實測進不去）
 
 - 入口 `https://aistudio.google.com/generate-speech`。用你手上的瀏覽器自動化工具（或手動）操作 AI Studio；需使用者瀏覽器已登入，遇登入牆／驗證就停下交還使用者。
-- **角色 Voice design**：從角色卡的年齡／性別／語氣人設寫 1~2 句英文描述（必含 `Taiwanese Mandarin accent` 與 `conversational` 兩個用語），存 `lab\<角色>\voice\desc-N.txt` → 網頁 Voice Design studio 貼描述、試聽、存成 `voice_…` → `python scripts\voices.py list` 確認 API 看得到同一 ID → 描述原句、id、expire_time 寫進回合日誌「目前最佳」（角色卡等定案才寫）。每角色每天 ≤3 版；落選的 `voices.py delete <id> --yes`。網頁版不可用才退 `voices.py design`。
+- **角色 Voice design**：從角色卡的年齡／性別／語氣人設寫 1~2 句英文描述（必含 `Taiwanese Mandarin accent` 與 `conversational` 兩個用語），存 `lab\<角色>\voice\desc-N.txt` → `python scripts\voices.py design --name <slug> --gender female|male|neutral --lang cmn-TW --desc-file <desc> --out <sample.wav>`（免費層實測可建、`cmn-TW` 可收；最後一行 JSON 就是 id，sample 給使用者試聽）→ `python scripts\voices.py list` 確認登錄簿 → 描述原句、id、expire_time 寫進回合日誌「目前最佳」（角色卡等定案才寫）。每角色每天 ≤3 版；落選的 `voices.py delete <id> --yes`。網頁版 Voice Design 只給付費 key，別按 Set up billing。
 - **本人 Voice replication**（只做使用者本人）：先過**同意閘**——Claude 貼出授權句原文（官方僅簡中文本，國語照唸）：「我是此声音的拥有者并授权谷歌使用此声音创建语音合成模型」；使用者在聊天室確認 (a) 是本人聲音 (b) 同意上傳 Google。錄音：手機安靜處錄兩段（授權句 ≥3 秒、自然說話 15~20 秒），任何方式傳到電腦即可（例：存成 `private\gemini\{consent,source}.m4a`）；網頁版可直接上傳這兩段建音色，或退路 `voices.py replicate`。本人 replicated 的 ID 只存 repo 外（或 `private\` 內）的私人檔，不進任何角色卡、不進 git。
-- **退路鏈**：網頁版不可用 → `voices.py probe`（走 API 造聲前跑一次）；probe **exit 2**（403／billing）（exit 2 先看 stderr：403／billing 才是『不開放』；若是全部語言碼被拒則改 `--langs` 再試）→ `api-facts.md` 記「voices.create 免費層不開放（日期）」，本節 API 造聲標不可用：角色改用預製音色（Sulafat／Achernar／Gacrux）＋底色加 `Taiwanese Mandarin accent`，本人聲音走本機克隆方案（如 F5-TTS），規則庫迴圈照跑；probe 只收 `en-US` → 仍可用，描述句帶 `Taiwanese Mandarin accent`，實際語言由 cue 文字決定（記 api-facts）。
+- **退路鏈**：API `design` 失敗才跑 `voices.py probe`（作者 2026-10-05 實測 create 可用、cmn-TW 可收，正常不必再跑）；probe **exit 2**（403／billing）（exit 2 先看 stderr：403／billing 才是『不開放』；若是全部語言碼被拒則改 `--langs` 再試）→ `api-facts.md` 記「voices.create 免費層不開放（日期）」，本節 API 造聲標不可用：角色改用預製音色（Sulafat／Achernar／Gacrux）＋底色加 `Taiwanese Mandarin accent`，本人聲音走本機克隆方案（如 F5-TTS），規則庫迴圈照跑；probe 只收 `en-US` → 仍可用，描述句帶 `Taiwanese Mandarin accent`，實際語言由 cue 文字決定（記 api-facts）。
 - **台灣腔上限**：voice 層連 3 輪腔沒移動 → 停，在本節寫明「prompted 音色唸不出台灣腔」上限，「台灣腔」需求改走本機克隆方案（如 F5-TTS，本人聲天生台灣腔）或其他支援 zh-TW 的 TTS（如 edge-tts zh-TW）。
 
 ## 第 2 階段：回合迴圈（一輪＝1 發 flash）
@@ -144,8 +144,8 @@ python scripts\voices.py probe [--langs cmn-TW,zh-TW,zh,cmn-CN,en-US] [--keep]  
 |---|---|
 | flash 約 10 發 | 保留 2 發給成品＋1 發基線（首日／換 voice）＋≤6 發訓練（拼盤 ≤2）＋定案日 1 發 |
 | lite | text／cue 檢查、新 voice_ 首次可用性測試 |
-| AI Studio 網頁版 | 造聲預設入口；flash 鎖死後的生成備援 |
-| voices.create（API） | 網頁版為主；確認是否共用 flash 前每天 ≤3 次（含 probe）；probe 一次最多試 5 個語言碼，被拒的 400 假設不吃額度（待驗） |
+| AI Studio 網頁版 | flash 鎖死後的**生成**備援（Playground 吃 Pro 配額）；Voice Design 需付費層，不當造聲入口 |
+| voices.create（API） | 造聲主線（免費層實測可建）；確認是否共用 flash 前每天 ≤3 次（含 probe）；probe 一次最多試 5 個語言碼，被拒的 400 假設不吃額度（待驗） |
 | list／get／delete | 不計額度 |
 
 計數：回合日誌手寫 `flash n/10`；**429 才是真相**（同一把 key 的其他程式用量看不到）。

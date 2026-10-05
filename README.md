@@ -8,7 +8,7 @@
 
 Gemini TTS 只有三支把手：**voice**（音色人設／口音，建一次）、**style**（每段一句英文風格描述）、**text**（逐字照唸——用字、語尾、替換字、`<sigh>` 這類行內標籤都算）。「像大陸腔」「太平」「唸錯字」這種評語，其實各自對應其中一支。
 
-這個 skill 把調聲變成回合制：每回合只改一件事、只燒 1 發 flash 請求；使用者用耳朵裁定好壞；Claude 負責分類、查規則庫、記錄，並維護專屬音色（AI Studio 網頁版造聲，或 `voices.py` 列／查／刪／到期重建）。**自帶引擎**（`scripts/tts_gemini.py`），不依賴其他 skill。
+這個 skill 把調聲變成回合制：每回合只改一件事、只燒 1 發 flash 請求；使用者用耳朵裁定好壞；Claude 負責分類、查規則庫、記錄，並維護專屬音色（`voices.py design` 用描述造聲——免費層實測可建；`list`／`get`／`delete`／到期重建）。**自帶引擎**（`scripts/tts_gemini.py`），不依賴其他 skill。
 
 ## 需要什麼
 
@@ -38,10 +38,10 @@ python scripts\tts_gemini.py --cues examples\範例角色\cues.txt --styles exam
 
 ## 兩種造聲
 
-預設走 **AI Studio 網頁版**（<https://aistudio.google.com/generate-speech>）；若你有 Google AI Pro，網頁版配額較高，可當造聲入口與備援。API 版（`voices.py design`／`replicate`）是退路。
+預設走 **API**（`voices.py design`／`replicate`，免費層實測可建、`language_code: cmn-TW` 可收）。AI Studio 網頁版（<https://aistudio.google.com/generate-speech>）的 Voice Design **需付費層 key**，免費 key 進不去（2026-10-05 實測）；網頁版 Playground 只拿來當 flash 額度用完後的生成備援（有 Google AI Pro 者配額較高）。
 
-- **Voice design（角色聲）**：寫 1~2 句英文描述（含 `Taiwanese Mandarin accent`、`conversational`）→ 網頁版試聽、存成 `voice_…` → `python scripts\voices.py list` 確認 API 看得到。
-- **Voice replication（只限你自己的聲音）**：先過同意閘（念出授權句、確認是本人並同意上傳 Google）；手機安靜處錄兩段（授權句 ≥3 秒、自然說話 15~20 秒）→ 網頁版上傳，或 `voices.py replicate`。本人 replicated 的 ID 只存 repo 外或 `private\` 內的私人檔，不進角色卡、不進 git。複製他人聲音一律不做。
+- **Voice design（角色聲）**：寫 1~2 句英文描述（含 `Taiwanese Mandarin accent`、`conversational`）→ `python scripts\voices.py design --name my-char --gender female --lang cmn-TW --desc-file lab\<角色>\voice\desc-1.txt --out lab\<角色>\voice\design-1.wav`（最後一行 JSON 就是 `voice_…` id，sample 先聽）→ `python scripts\voices.py list` 確認登錄簿。
+- **Voice replication（只限你自己的聲音）**：先過同意閘（念出授權句、確認是本人並同意上傳 Google）；手機安靜處錄兩段（授權句 ≥3 秒、自然說話 15~20 秒）→ `voices.py replicate --source … --consent …`（網頁版 Voice Replication 同樣在付費層）。本人 replicated 的 ID 只存 repo 外或 `private\` 內的私人檔，不進角色卡、不進 git。複製他人聲音一律不做。
 
 ## 規則庫怎麼長
 
@@ -50,7 +50,7 @@ python scripts\tts_gemini.py --cues examples\範例角色\cues.txt --styles exam
 ## 限制與未驗事項
 
 - 免費層額度：flash 每天約 10 次請求、lite 分開算（以你的專案實際 429 為準）；本 skill 為免費層設計，要不要付費由你決定。
-- `voices.create`（API 造聲）在免費層是否開放、接受哪些 `language_code`、是否與 flash 共用額度，都還沒實測——目前網頁版為主。詳見 `learnings/api-facts.md`，每列都帶驗證方式與日期。
+- `voices.create`（API 造聲）免費層**可用**、`cmn-TW` 可收（2026-10-05 實測）；是否與 flash 共用每日額度仍待驗。詳見 `learnings/api-facts.md`，每列都帶驗證方式與日期。
 - 台灣腔有上限：若 voice 層連 3 輪沒移動，可能是 prompted 音色唸不出台灣腔，屆時需改走其他方案（`SKILL.md` 有退路說明）。
 - 配樂、音效、混音不在範圍內；旁白成品可接任何混音工具。
 
