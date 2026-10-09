@@ -1,1 +1,242 @@
-<!doctype html><meta charset="utf-8"><title>聲音實驗室</title><script>const TOKEN = "__TOKEN__";</script>
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>聲音實驗室</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--fg:#1f1f1d;--muted:#6b6a66;--line:#e2e0da;--warn:#854f0b;--warnbg:#faeeda;--ok:#3b6d11;--accent:#185fa5;--accentbg:#e6f1fb;--danger:#a32d2d}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1c1b;--card:#262624;--fg:#ecebe6;--muted:#a3a29c;--line:#3a3936;--warn:#fac775;--warnbg:#412402;--ok:#97c459;--accent:#85b7eb;--accentbg:#042c53;--danger:#f09595}}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 system-ui,"Microsoft JhengHei",sans-serif}
+main{max-width:1100px;margin:0 auto;padding:16px}
+.bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:0}
+h2{font-size:15px;margin:0 0 8px;font-weight:600}
+.row{display:grid;grid-template-columns:72px minmax(0,1fr);gap:6px 8px;align-items:center;margin-bottom:6px}
+.sl{display:grid;grid-template-columns:72px minmax(0,1fr) 84px;gap:6px 8px;align-items:center}
+input,select,textarea,button{font:inherit;color:inherit}
+input[type=text],select,textarea{width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+textarea{font-family:Consolas,"Microsoft JhengHei",monospace;resize:vertical}
+button{background:transparent;border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+button.go{border-color:var(--warn);color:var(--warn)}
+button:disabled{opacity:.5;cursor:wait}
+.pill{padding:3px 10px;border-radius:8px;background:var(--warnbg);color:var(--warn)}
+.note{padding:4px 8px;border-radius:8px;background:var(--accentbg);color:var(--accent);margin:8px 0}
+.note.warn{background:var(--warnbg);color:var(--warn)}
+.err{color:var(--danger);white-space:pre-wrap;margin-bottom:8px}
+.muted{color:var(--muted)}
+table{width:100%;border-collapse:collapse}
+td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left;vertical-align:middle;font-weight:400}
+th{color:var(--muted)}
+pre{white-space:pre-wrap;margin:6px 0 0;font-size:12px}
+audio{width:100%;margin:4px 0}
+.logwrap{overflow-x:auto}
+</style>
+</head>
+<body>
+<main>
+  <div class="bar">
+    <label>角色 <select id="role"></select></label>
+    <span style="flex:1"></span>
+    <span class="pill" id="quota">今日 flash –</span>
+    <span class="muted" id="reset"></span>
+  </div>
+  <div class="err" id="err" role="alert"></div>
+  <div class="grid">
+    <section class="card">
+      <h2>生成 <span class="muted">· 每按一次用 1 次額度</span></h2>
+      <div class="row">
+        <label class="muted" for="voice">音色</label><select id="voice"></select>
+        <label class="muted" for="model">模型</label>
+        <select id="model"><option value="flash">flash（演技最好，算每日次數）</option><option value="lite">lite（另計次數）</option></select>
+        <label class="muted" for="base">底色</label><input type="text" id="base" placeholder="Taiwanese Mandarin, conversational, natural pace">
+      </div>
+      <label class="muted" for="cues">台詞（配音譜：【平穩】換段、【停 1.0】插停頓）</label>
+      <textarea id="cues" rows="9"></textarea>
+      <label class="muted" for="styles">風格表（每行「名稱: 英文風格句」；底色寫在上面）</label>
+      <textarea id="styles" rows="4"></textarea>
+      <div class="note" id="diff">—</div>
+      <div style="display:flex;gap:8px"><button id="dry">試切段（免費）</button><button class="go" id="gen">生成</button></div>
+      <pre id="genout" class="muted"></pre>
+      <audio id="genaudio" controls hidden></audio>
+    </section>
+    <section class="card">
+      <h2>後製 <span class="muted">· 免費</span></h2>
+      <div class="row"><label class="muted" for="src">來源</label><select id="src"></select></div>
+      <div class="sl">
+        <label class="muted" for="pitch">音高</label><input type="range" id="pitch" min="-3" max="3" step="0.5" value="0"><span id="pitchv"></span>
+        <label class="muted" for="tempo">語速</label><input type="range" id="tempo" min="0.8" max="1.2" step="0.05" value="1"><span id="tempov"></span>
+        <label class="muted" for="pause">句間停頓</label><input type="range" id="pause" min="0" max="1" step="0.05" value="0"><span id="pausev"></span>
+        <label class="muted" for="gain">音量</label><input type="range" id="gain" min="-6" max="6" step="1" value="0"><span id="gainv"></span>
+      </div>
+      <div class="muted" style="margin-top:8px">原始</div><audio id="orig" controls></audio>
+      <div class="muted">調整後 <span id="pvstate"></span></div><audio id="prev" controls></audio>
+      <div style="display:flex;gap:8px;margin-top:8px"><button id="reset0">歸零</button><span style="flex:1"></span><button id="save">存檔</button></div>
+    </section>
+  </div>
+  <section class="card" style="margin-top:12px">
+    <h2>回合日誌 <span class="muted">· 評語打完按 Enter 或點別處就存</span></h2>
+    <div class="logwrap"><table>
+      <thead><tr><th>輪</th><th>日期</th><th>模型</th><th>只改了什麼</th><th>試聽</th><th style="width:32%">你的評語</th></tr></thead>
+      <tbody id="log"></tbody>
+    </table></div>
+  </section>
+</main>
+<script>
+const TOKEN = "__TOKEN__";
+const $ = id => document.getElementById(id);
+const KEYS = [["voice", "音色"], ["model", "模型"], ["base", "底色"], ["cues", "台詞"], ["styles", "風格表"]];
+let S = null;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Token": TOKEN}, body: JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({error: `HTTP ${r.status}`}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+function err(e) { $("err").textContent = e ? String(e.message || e) : ""; }
+const role = () => $("role").value;
+const audioUrl = f => `/audio/${encodeURIComponent(role())}/${encodeURIComponent(f)}?t=${Date.now()}`;
+const form = () => ({role: role(), voice: $("voice").value, model: $("model").value, base: $("base").value, cues: $("cues").value, styles: $("styles").value});
+function setSel(sel, v) { if (v && ![...sel.options].some(o => o.value === v)) sel.add(new Option(v, v)); sel.value = v; }
+
+function showDiff() {
+  const box = $("diff");
+  if (!S || !S.last || !Object.keys(S.last).length) { box.textContent = "第一輪：基線"; box.className = "note"; return; }
+  const f = form();
+  const ch = KEYS.filter(([k]) => (S.last[k] || "").trim() !== (f[k] || "").trim()).map(([, l]) => l);
+  box.textContent = ch.length ? `跟上一輪比改了：${ch.join("、")}` + (ch.length > 1 ? "（一輪只改一件事比較好判斷）" : "") : "跟上一輪一樣（會是重抽）";
+  box.className = ch.length > 1 ? "note warn" : "note";
+}
+function showQuota() {
+  $("quota").textContent = S.exhausted ? "今天 flash 用完了" : `今日 flash ${S.used} / ${S.daily} · 保留 ${S.reserve}`;
+  $("reset").textContent = `${S.reset} 重置`;
+}
+async function loadVoices() {
+  const v = await api("/api/voices");
+  $("voice").innerHTML = "";
+  for (const x of v.custom) $("voice").add(new Option(`${x.display_name}（自建）`, x.id));
+  for (const x of v.presets) $("voice").add(new Option(`${x.name} · ${x.note}`, x.name));
+  if (v.error) err("自建音色清單讀不到（只列預製音色）：" + v.error);
+}
+function renderLog() {
+  const tb = $("log");
+  tb.innerHTML = "";
+  for (const r of [...S.rounds].reverse()) {
+    const tr = tb.insertRow();
+    for (const k of ["輪", "日期", "模型", "只改了什麼"]) tr.insertCell().textContent = r[k] || "";
+    const td = tr.insertCell();
+    const f = S.audio.find(a => a.startsWith(r["輪"] + "."));
+    if (f) {
+      const b = document.createElement("button");
+      b.textContent = "▶";
+      b.setAttribute("aria-label", `播放 ${f}`);
+      b.onclick = () => new Audio(audioUrl(f)).play().catch(err);
+      td.append(b);
+    }
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.placeholder = "一句話就好";
+    inp.setAttribute("aria-label", `${r["輪"]} 評語`);
+    inp.value = r["使用者原話"] || "";
+    inp.onchange = async () => {
+      try { await api("/api/comment", {role: role(), round: r["輪"], comment: inp.value}); r["使用者原話"] = inp.value; inp.style.borderColor = "var(--ok)"; }
+      catch (e) { err(e); }
+    };
+    inp.onkeydown = e => { if (e.key === "Enter") inp.blur(); };
+    tr.insertCell().append(inp);
+  }
+}
+const fx = () => ({semitones: +$("pitch").value, tempo: +$("tempo").value, pause_add: +$("pause").value, gain_db: +$("gain").value});
+function showFx() {
+  const f = fx();
+  $("pitchv").textContent = `${f.semitones > 0 ? "+" : ""}${f.semitones.toFixed(1)} 半音`;
+  $("tempov").textContent = `${f.tempo.toFixed(2)}×`;
+  $("pausev").textContent = `+${f.pause_add.toFixed(2)} 秒`;
+  $("gainv").textContent = `${f.gain_db > 0 ? "+" : ""}${f.gain_db} dB`;
+}
+function loadSrc() {
+  if ($("src").value) $("orig").src = audioUrl($("src").value); else $("orig").removeAttribute("src");
+  $("prev").removeAttribute("src");
+  $("pvstate").textContent = "";
+}
+let pvSeq = 0;
+async function preview() {
+  if (!$("src").value) return;
+  const seq = ++pvSeq;
+  $("pvstate").textContent = "（產生中…）";
+  try {
+    const j = await api("/api/preview", {role: role(), src: $("src").value, ...fx()});
+    if (seq !== pvSeq) return;
+    $("prev").src = audioUrl(j.file);
+    $("pvstate").textContent = "";
+    $("prev").play().catch(() => {});
+  } catch (e) { if (seq === pvSeq) { $("pvstate").textContent = ""; err(e); } }
+}
+async function loadState() {
+  err("");
+  S = await api(`/api/state?role=${encodeURIComponent(role())}`);
+  setSel($("voice"), S.voice);
+  $("model").value = S.model;
+  $("base").value = S.base;
+  $("cues").value = S.cues;
+  $("styles").value = S.styles;
+  const keep = $("src").value;
+  $("src").innerHTML = "";
+  for (const f of S.audio) $("src").add(new Option(f, f));
+  if (S.audio.includes(keep)) $("src").value = keep; else if (S.audio.length) $("src").value = S.audio[S.audio.length - 1];
+  $("gen").textContent = `生成 ${S.next}`;
+  renderLog(); showQuota(); showDiff(); loadSrc();
+  if (S.log_error) err(S.log_error);
+}
+
+for (const id of ["pitch", "tempo", "pause", "gain"]) { $(id).oninput = showFx; $(id).onchange = preview; }
+for (const id of ["voice", "model", "base", "cues", "styles"]) $(id).addEventListener("input", showDiff);
+$("src").onchange = loadSrc;
+$("reset0").onclick = () => { $("pitch").value = 0; $("tempo").value = 1; $("pause").value = 0; $("gain").value = 0; showFx(); preview(); };
+$("save").onclick = async () => {
+  if (!$("src").value) return err("先選來源檔");
+  $("save").disabled = true;
+  try { const j = await api("/api/save", {role: role(), src: $("src").value, ...fx()}); await loadState(); $("src").value = j.file; loadSrc(); }
+  catch (e) { err(e); }
+  finally { $("save").disabled = false; }
+};
+$("dry").onclick = async () => {
+  err(""); $("dry").disabled = true; $("genout").textContent = "試切段中…";
+  try { $("genout").textContent = (await api("/api/dryrun", form())).table; }
+  catch (e) { $("genout").textContent = ""; err(e); }
+  finally { $("dry").disabled = false; }
+};
+$("gen").onclick = async () => {
+  const f = form(), flash = f.model === "flash", n = S.used + 1;
+  let msg = flash ? `會用掉 1 次 flash，今天第 ${n}/${S.daily} 次。` : "用 lite 生成（不算 flash 次數）。";
+  if (flash && S.daily - S.used <= S.reserve) msg = `注意：這次會用到保留給成品的 ${S.reserve} 次（今天第 ${n}/${S.daily} 次）。確定要用在訓練嗎？`;
+  if (!confirm(msg + "\n\n" + $("diff").textContent)) return;
+  err(""); $("gen").disabled = true; $("genout").textContent = "生成中…（約 10～60 秒）";
+  try {
+    const j = await api("/api/generate", f);
+    $("genout").textContent = `完成 ${j.file}（${j.beats} 段）` + (j.beats >= 2 ? "\nflash 多段可能把最後一段唸兩次，聽的時候注意有沒有重複。" : "");
+    await loadState();
+    $("genaudio").hidden = false; $("genaudio").src = audioUrl(j.file);
+    $("src").value = j.file; loadSrc();
+  } catch (e) { $("genout").textContent = ""; err(e); await loadState().catch(() => {}); }
+  finally { $("gen").disabled = false; }
+};
+
+(async () => {
+  try {
+    showFx();
+    const r = await api("/api/roles");
+    if (!r.roles.length) return err("lab\\ 底下還沒有角色資料夾。先照 SKILL.md 第 1 階段建一個（例如把 examples\\範例角色 整夾複製到 lab\\）。");
+    for (const x of r.roles) $("role").add(new Option(x, x));
+    try { const saved = localStorage.getItem("gvl-role"); if (saved && r.roles.includes(saved)) $("role").value = saved; } catch {}
+    $("role").onchange = () => { try { localStorage.setItem("gvl-role", role()); } catch {} loadState().catch(err); };
+    await loadVoices().catch(e => err("音色清單讀不到：" + e.message));
+    await loadState();
+  } catch (e) { err(e); }
+})();
+</script>
+</body>
+</html>
