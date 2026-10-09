@@ -23,6 +23,8 @@ import tempfile
 import threading
 import webbrowser
 from zoneinfo import ZoneInfo
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, unquote, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -318,6 +320,256 @@ def post_summary(src_name: str, fx: dict) -> str:
     return f"後製 {src_name}：" + ("、".join(parts) if parts else "無變更（轉檔）")
 
 
+# ---------- 動作（HTTP 路由呼叫；ValueError→400、Busy→409、RuntimeError→502） ----------
+class Busy(Exception):
+    pass
+
+
+GEN_LOCK, PREVIEW_LOCK = threading.Lock(), threading.Lock()
+STATE = {"exhausted_day": None}  # 今天收過每日額度 429 → 記太平洋日期
+_VOICES = {}
+
+
+def need_key():
+    """沒金鑰 → RuntimeError；有就補進本程序 env（子程序繼承）。selfcheck 會換掉它。"""
+    try:
+        _key()
+    except SystemExit:
+        raise RuntimeError("沒有 GEMINI_API_KEY（到 https://aistudio.google.com/apikey 建一把，setx 後重開介面）")
+
+
+def _gen_params(p: dict) -> dict:
+    voice, model = str(p.get("voice") or "Sulafat"), str(p.get("model") or "flash")
+    if not VOICE_OK.match(voice):
+        raise ValueError(f"音色名稱不合法：{voice!r}")
+    if model not in ("flash", "lite"):
+        raise ValueError(f"模型只能是 flash 或 lite：{model!r}")
+    return {"voice": voice, "model": model, "base": str(p.get("base") or ""),
+            "cues": str(p.get("cues") or ""), "styles": str(p.get("styles") or "")}
+
+
+def save_inputs(d: str, g: dict):
+    with open(os.path.join(d, "cues.txt"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(g["cues"].replace("\r\n", "\n"))
+    with open(os.path.join(d, "styles.txt"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(join_styles(g["base"], g["styles"].replace("\r\n", "\n")))
+
+
+def tts_cmd(d: str, g: dict, out: str, dry: bool) -> list:
+    return [sys.executable, os.path.join(HERE, "tts_gemini.py"), "--cues", os.path.join(d, "cues.txt"),
+            "--styles", os.path.join(d, "styles.txt"), "--voice", g["voice"], "--model", g["model"],
+            "--out", out, "--dry-run" if dry else "--one-request"]
+
+
+def get_state(role: str) -> dict:
+    d = role_dir(role)
+
+    def read(name):
+        try:
+            with open(os.path.join(d, name), encoding="utf-8-sig") as f:
+                return f.read()
+        except OSError:
+            return ""
+    base, styles = split_styles(read("styles.txt"))
+    last, rows, log_error = load_last(d), [], ""
+    if os.path.exists(os.path.join(d, LOG_NAME)):
+        try:
+            rows = read_rounds(os.path.join(d, LOG_NAME))
+        except ValueError as e:
+            log_error = str(e)
+    return {"cues": read("cues.txt"), "base": base, "styles": styles, "last": last,
+            "voice": last.get("voice") or "Sulafat", "model": last.get("model") or "flash",
+            "rounds": rows, "log_error": log_error, "audio": list_audio(d), "next": next_round(d, rows),
+            "used": flash_used(rows), "daily": FLASH_DAILY, "reserve": FLASH_RESERVE,
+            "exhausted": STATE["exhausted_day"] == pt_day(now_tw()), "reset": reset_at()}
+
+
+def get_voices() -> dict:
+    """預製 30 款＋自建音色（voices.py list --json；不計 TTS 額度）。成功才快取，失敗下次重試。"""
+    presets = [{"name": n, "trait": t, "note": note} for n, t, note in VOICES]
+    if "custom" not in _VOICES:
+        try:
+            listed = json.loads(_run([sys.executable, os.path.join(HERE, "voices.py"), "list", "--json"], timeout=60))
+            _VOICES["custom"] = [{"id": v["id"], "display_name": v.get("display_name") or v["id"]} for v in listed]
+        except (RuntimeError, ValueError, KeyError, TypeError) as e:
+            return {"presets": presets, "custom": [], "error": str(e)[-200:]}
+    return {"presets": presets, "custom": _VOICES["custom"], "error": ""}
+
+
+def do_dryrun(p: dict) -> dict:
+    d, g = role_dir(p.get("role", "")), _gen_params(p)
+    save_inputs(d, g)
+    out = os.path.join(tempfile.gettempdir(), "gvl_ui_dry.wav")
+    return {"table": _run(tts_cmd(d, g, out, dry=True)).strip()}
+
+
+def do_generate(p: dict) -> dict:
+    d, g = role_dir(p.get("role", "")), _gen_params(p)
+    if not GEN_LOCK.acquire(blocking=False):
+        raise Busy("上一個生成還在跑，等它完成")
+    try:
+        log = ensure_log(d)
+        rows = read_rounds(log)  # 日誌壞了就在花額度前停下
+        save_inputs(d, g)
+        need_key()
+        rnd = next_round(d, rows)
+        out_name = rnd + ".mp3"
+        try:
+            stdout = _run(tts_cmd(d, g, os.path.join(d, out_name), dry=False))
+        except RuntimeError as e:
+            if is_quota_error(str(e)):
+                STATE["exhausted_day"] = pt_day(now_tw())
+            raise
+        flash = g["model"] == "flash"
+        used = flash_used(rows) + (1 if flash else 0)
+        append_round(log, {"輪": rnd, "日期": now_tw().strftime("%Y-%m-%d %H:%M"), "模型": g["model"],
+                           "flash": f"{used}/{FLASH_DAILY}" if flash else "-", "只改了什麼": diff_params(load_last(d), g)})
+        save_last(d, g)
+        m = re.search(r"(\d+) beats", stdout)
+        return {"round": rnd, "file": out_name, "beats": int(m.group(1)) if m else 0, "used": used}
+    finally:
+        GEN_LOCK.release()
+
+
+def _src(d: str, p: dict):
+    name = safe_name(str(p.get("src") or ""))
+    path = os.path.join(d, name)
+    if not name.lower().endswith(AUDIO_EXT) or not os.path.isfile(path):
+        raise ValueError(f"來源檔不存在：{name}")
+    return name, path
+
+
+def do_preview(p: dict) -> dict:
+    d = role_dir(p.get("role", ""))
+    _, src = _src(d, p)
+    fx = fx_params(p)
+    with PREVIEW_LOCK:
+        render_post(src, os.path.join(d, PREVIEW_NAME), **fx)
+    return {"file": PREVIEW_NAME}
+
+
+def do_save(p: dict) -> dict:
+    d = role_dir(p.get("role", ""))
+    name, src = _src(d, p)
+    fx = fx_params(p)
+    log = ensure_log(d)
+    rnd = next_round(d, read_rounds(log))
+    render_post(src, os.path.join(d, rnd + ".mp3"), **fx)
+    append_round(log, {"輪": rnd, "日期": now_tw().strftime("%Y-%m-%d %H:%M"), "模型": "後製", "flash": "-",
+                       "只改了什麼": post_summary(name, fx)})
+    return {"round": rnd, "file": rnd + ".mp3"}
+
+
+def do_comment(p: dict) -> dict:
+    d = role_dir(p.get("role", ""))
+    set_comment(ensure_log(d), str(p.get("round") or ""), str(p.get("comment") or ""))
+    return {"ok": True}
+
+
+# ---------- HTTP ----------
+TOKEN = secrets.token_urlsafe(16)
+ALLOWED_HOSTS = set()  # 綁好埠後填入；擋 DNS rebinding
+ROUTES = {"/api/dryrun": do_dryrun, "/api/generate": do_generate, "/api/preview": do_preview,
+          "/api/save": do_save, "/api/comment": do_comment}
+MIME = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4"}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+        if not isinstance(body, bytes):
+            body = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _guard(self, post: bool) -> bool:
+        if self.headers.get("Host", "") not in ALLOWED_HOSTS:
+            self._send(403, {"error": "Host 不符（只接受 127.0.0.1／localhost）"})
+            return False
+        if post and not secrets.compare_digest(self.headers.get("X-Token", ""), TOKEN):
+            self._send(403, {"error": "token 不符，請重新整理頁面"})
+            return False
+        return True
+
+    def _dispatch(self, fn, *a):
+        try:
+            self._send(200, fn(*a))
+        except Busy as e:
+            self._send(409, {"error": str(e)})
+        except ValueError as e:
+            self._send(400, {"error": str(e)})
+        except Exception as e:  # noqa: BLE001 — 子程序／檔案錯誤原樣給前端看
+            self._send(502 if isinstance(e, RuntimeError) else 500, {"error": str(e)})
+
+    def _audio(self, rel: str):
+        try:
+            parts = rel.split("/")
+            if len(parts) != 2:
+                raise ValueError("路徑不合法")
+            d, name = role_dir(parts[0]), safe_name(parts[1])
+            ext = os.path.splitext(name)[1].lower()
+            path = os.path.join(d, name)
+            if ext not in MIME or not os.path.isfile(path):
+                return self._send(404, {"error": f"沒有這個音檔：{name}"})
+            with open(path, "rb") as f:
+                self._send(200, f.read(), MIME[ext])
+        except ValueError as e:
+            self._send(400, {"error": str(e)})
+
+    def do_GET(self):
+        if not self._guard(post=False):
+            return
+        u = urlparse(self.path)
+        q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        if u.path == "/":
+            with open(os.path.join(HERE, "ui.html"), encoding="utf-8") as f:
+                return self._send(200, f.read().replace("__TOKEN__", TOKEN).encode("utf-8"), "text/html; charset=utf-8")
+        if u.path == "/api/roles":
+            return self._dispatch(lambda: {"roles": list_roles()})
+        if u.path == "/api/state":
+            return self._dispatch(get_state, q.get("role", ""))
+        if u.path == "/api/voices":
+            return self._dispatch(get_voices)
+        if u.path.startswith("/audio/"):
+            return self._audio(unquote(u.path[len("/audio/"):]))
+        self._send(404, {"error": "找不到"})
+
+    def do_POST(self):
+        if not self._guard(post=True):
+            return
+        fn = ROUTES.get(urlparse(self.path).path)
+        if not fn:
+            return self._send(404, {"error": "找不到"})
+        try:
+            p = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            if not isinstance(p, dict):
+                raise ValueError
+        except ValueError:
+            return self._send(400, {"error": "請求內容不是 JSON 物件"})
+        self._dispatch(fn, p)
+
+
+def serve(port: int, open_browser: bool):
+    os.makedirs(LAB, exist_ok=True)
+    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    p = srv.server_address[1]
+    ALLOWED_HOSTS.update({f"127.0.0.1:{p}", f"localhost:{p}"})
+    url = f"http://127.0.0.1:{p}/"
+    print(f"聲音實驗室介面：{url}　（Ctrl+C 結束）", flush=True)
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
 # ---------- 自檢 ----------
 def _check_core(tmp):
     # 名稱防護
@@ -452,6 +704,118 @@ def _check_post(tmp):
     assert post_summary("r01.mp3", fx_params({"tempo": 0.9, "gain_db": -2})) == "後製 r01.mp3：語速 0.90×、音量 -2 dB"
 
 
+def _check_http(tmp):
+    import http.client
+    from urllib.parse import quote
+    global _run, need_key
+    role = "介面角色"
+    d = os.path.join(tmp, role)
+    os.makedirs(d)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = srv.server_address[1]
+    ALLOWED_HOSTS.update({f"127.0.0.1:{port}", f"localhost:{port}"})
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    def req(method, path, body=None, token=TOKEN, host=None):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=120)
+        h = {"Content-Type": "application/json", "X-Token": token}
+        if host:
+            h["Host"] = host
+        c.request(method, path, None if body is None else json.dumps(body), h)
+        r = c.getresponse()
+        raw = r.read()
+        c.close()
+        return r.status, (json.loads(raw) if r.getheader("Content-Type", "").startswith("application/json") else raw)
+
+    state = lambda: req("GET", "/api/state?role=" + quote(role))[1]  # noqa: E731
+    real_run, real_key = _run, need_key
+    try:
+        # 首頁注入 token；Host／token 防護
+        st, html = req("GET", "/")
+        assert st == 200 and TOKEN.encode() in html and b"__TOKEN__" not in html
+        assert req("GET", "/api/roles", host="evil.example:80")[0] == 403
+        assert req("POST", "/api/comment", {"role": role}, token="x")[0] == 403
+        assert role in req("GET", "/api/roles")[1]["roles"]
+        # 試切段：真跑 tts_gemini --dry-run（0 額度）；cues／styles 寫回檔
+        form = {"role": role, "voice": "Sulafat", "model": "flash", "base": "calm",
+                "cues": "【平穩】\n你好啊。\n【停 1.0】\n【收尾】\n晚安。\n", "styles": "平穩: soft"}
+        st, j = req("POST", "/api/dryrun", form)
+        assert st == 200 and "DRY-RUN" in j["table"], j
+        s = state()
+        assert s["base"] == "calm" and s["styles"] == "平穩: soft" and s["cues"] == form["cues"]
+        assert s["rounds"] == [] and s["next"] == "r01" and s["used"] == 0 and s["daily"] == FLASH_DAILY
+        assert req("POST", "/api/dryrun", dict(form, voice="--evil"))[0] == 400
+        assert req("POST", "/api/dryrun", dict(form, model="pro"))[0] == 400
+        assert req("POST", "/api/dryrun", dict(form, role="../x"))[0] == 400
+        # 生成：假 _run／need_key（不連網、不花額度）
+        calls = []
+
+        def fake_run(cmd, timeout=600):
+            calls.append(cmd)
+            with open(cmd[cmd.index("--out") + 1], "wb") as f:
+                f.write(b"ID3fake")
+            return "OK x (1 KB, 2.0s, 2 beats, gemini / Sulafat)\n"
+        _run, need_key = fake_run, (lambda: None)
+        st, j = req("POST", "/api/generate", form)
+        assert st == 200 and j == {"round": "r01", "file": "r01.mp3", "beats": 2, "used": 1}, j
+        assert "--one-request" in calls[-1] and "--dry-run" not in calls[-1]
+        st, j = req("POST", "/api/generate", dict(form, base="warm"))
+        assert st == 200 and j["round"] == "r02" and j["used"] == 2, j
+        s = state()
+        assert [(r["輪"], r["flash"], r["只改了什麼"]) for r in s["rounds"]] == [("r01", "1/10", "基線"), ("r02", "2/10", "底色")]
+        assert s["used"] == 2 and s["last"]["base"] == "warm"
+        # 連點：生成中第二個請求 409
+        GEN_LOCK.acquire()
+        try:
+            assert req("POST", "/api/generate", form)[0] == 409
+        finally:
+            GEN_LOCK.release()
+
+        # 每日額度用完：502、不寫日誌、state 標記 exhausted
+        def quota_run(cmd, timeout=600):
+            raise RuntimeError("今天的免費額度用完了（每天 10 次請求，台灣時間 15:00 重置）。")
+        _run = quota_run
+        st, j = req("POST", "/api/generate", form)
+        assert st == 502 and "額度用完" in j["error"], j
+        s = state()
+        assert s["exhausted"] and len(s["rounds"]) == 2
+        STATE["exhausted_day"] = None
+        # 日誌壞了 → 花額度前就停（_run 不能被叫到）、檔案不動
+        _run = fake_run
+        calls.clear()
+        logp = os.path.join(d, LOG_NAME)
+        good = _read_lines(logp)
+        _write_lines(logp, ["# 壞掉的日誌"])
+        st, j = req("POST", "/api/generate", form)
+        assert st == 400 and "輪次" in j["error"] and calls == [], j
+        assert _read_lines(logp) == ["# 壞掉的日誌"]
+        _write_lines(logp, good)
+    finally:
+        _run, need_key = real_run, real_key
+    # 後製（真 ffmpeg）＋評語＋音檔供應
+    _tone_wav(os.path.join(d, "src.wav"))
+    st, j = req("POST", "/api/preview", {"role": role, "src": "src.wav", "semitones": 0.5})
+    assert st == 200 and j == {"file": PREVIEW_NAME}, j
+    st, j = req("POST", "/api/save", {"role": role, "src": "src.wav", "pause_add": 0.3})
+    assert st == 200 and j == {"round": "r03", "file": "r03.mp3"}, j
+    assert req("POST", "/api/save", {"role": role, "src": "沒這個.wav"})[0] == 400
+    assert req("POST", "/api/preview", {"role": role, "src": "src.wav", "tempo": "快"})[0] == 400
+    assert req("POST", "/api/comment", {"role": role, "round": "r03", "comment": "停頓剛好"})[0] == 200
+    assert req("POST", "/api/comment", {"role": role, "round": "r99", "comment": "x"})[0] == 400
+    s = state()
+    last = s["rounds"][-1]
+    assert (last["輪"], last["模型"], last["只改了什麼"], last["使用者原話"]) == ("r03", "後製", "後製 src.wav：停頓 +0.30 秒", "停頓剛好")
+    assert s["used"] == 2 and "r03.mp3" in s["audio"] and PREVIEW_NAME not in s["audio"]
+    st, raw = req("GET", f"/audio/{quote(role)}/r03.mp3")
+    assert st == 200 and len(raw) > 1000
+    assert req("GET", f"/audio/{quote(role)}/{quote(PREVIEW_NAME)}")[0] == 200
+    assert req("GET", f"/audio/{quote(role)}/{quote(LAST_NAME)}")[0] == 404
+    assert req("GET", "/audio/%2E%2E%2Fx/a.mp3")[0] == 400
+    assert req("GET", f"/audio/{quote(role)}/..%5Cx.mp3")[0] == 400
+    srv.shutdown()
+    srv.server_close()
+
+
 def selfcheck():
     global LAB
     tmp = tempfile.mkdtemp(prefix="gvl_ui_check_")
@@ -459,6 +823,7 @@ def selfcheck():
     try:
         _check_core(tmp)
         _check_post(tmp)
+        _check_http(tmp)
         print("selfcheck OK")
     finally:
         LAB = old
@@ -467,12 +832,14 @@ def selfcheck():
 
 def main():
     ap = argparse.ArgumentParser(description="gemini-voice-lab 本機微調介面")
+    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--no-browser", action="store_true", help="不自動開瀏覽器")
     ap.add_argument("--selfcheck", action="store_true", help="離線自檢（不連網、0 額度）")
     a = ap.parse_args()
     if a.selfcheck:
         selfcheck()
         return
-    ap.error("伺服器還沒做（Task 3）")
+    serve(a.port, not a.no_browser)
 
 
 if __name__ == "__main__":
