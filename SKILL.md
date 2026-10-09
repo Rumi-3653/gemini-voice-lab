@@ -130,7 +130,7 @@ tts_gemini 走 PowerShell 並注入金鑰（agent 的工具環境常讀不到使
 
 ## 介面（選用）
 
-使用者想自己動手調：`python scripts\ui.py`（只綁 127.0.0.1，自動開瀏覽器；`--port`、`--no-browser`；`--selfcheck` 離線自檢）。生成區＝`tts_gemini.py --one-request`（每按 1 發），後製區＝`stretch_pauses.py`＋ffmpeg rubberband（0 發，試聽即成品）；每輪自動寫進 `lab\<角色>\回合日誌.md`（日期欄含時間，供太平洋日界計數），評語寫進「使用者原話」欄。
+使用者想自己動手調：`python scripts\ui.py`（只綁 127.0.0.1，自動開瀏覽器；`--port`、`--no-browser`；`--selfcheck` 離線自檢）。要桌面圖示：`python scripts\ui.py --install-shortcut`（pythonw＋`--app`：Edge 獨立視窗、單一實例、關窗 3 分鐘後自動結束；無主控台時訊息在 `lab\.ui.log`）。生成區＝`tts_gemini.py --one-request`（每按 1 發），後製區＝`stretch_pauses.py`＋ffmpeg rubberband（0 發，試聽即成品）；每輪自動寫進 `lab\<角色>\回合日誌.md`（日期欄含時間，供太平洋日界計數），評語寫進「使用者原話」欄。
 
 - **介面不碰 `rules.md`**：使用者說「整理一下／看日誌」→ 讀回合日誌裡介面留下的列與評語，照第 2 階段「當場蒸餾」回寫規則庫，並補該列的「判定」「規則」兩欄。
 - 介面存的 `cues.txt`／`styles.txt` 就是現況；Claude 接手下一輪前先讀這兩個檔與 `.ui_last.json`。

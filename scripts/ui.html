@@ -230,6 +230,7 @@ $("gen").onclick = async () => {
   finally { $("gen").disabled = false; }
 };
 
+setInterval(() => fetch("/api/ping").catch(() => {}), 30000);  // 桌面捷徑模式：視窗開著就回報，關掉 3 分鐘後伺服器自己結束
 (async () => {
   try {
     showFx();

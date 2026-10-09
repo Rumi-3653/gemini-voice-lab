@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import webbrowser
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +29,9 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+if sys.stdout is None or sys.stderr is None:  # pythonw（桌面捷徑）沒有主控台；tts_gemini 一 import 就碰 sys.stdout
+    os.makedirs(os.path.join(ROOT, "lab"), exist_ok=True)
+    sys.stdout = sys.stderr = open(os.path.join(ROOT, "lab", ".ui.log"), "a", encoding="utf-8", buffering=1)
 sys.path.insert(0, HERE)
 try:
     from tts_gemini import VOICES
@@ -49,6 +53,7 @@ def _zones(zi=ZoneInfo):
 PT, TW = _zones()
 FLASH_DAILY, FLASH_RESERVE = 10, 2
 AUDIO_EXT = (".mp3", ".wav", ".m4a")
+NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW：pythonw 底下叫 ffmpeg／python 不閃黑窗
 BAD_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 VOICE_OK = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,79}$")
 RND = re.compile(r"^r(\d+)", re.I)
@@ -283,7 +288,7 @@ def _env(extra=None) -> dict:
 def _run(cmd: list, timeout=600) -> str:
     """跑子程序；非 0 → RuntimeError（訊息＝stderr 末段，tts_gemini／ffmpeg 本身已是可讀訊息）。回 stdout。"""
     try:
-        r = subprocess.run(cmd, capture_output=True, env=_env(), timeout=timeout)
+        r = subprocess.run(cmd, capture_output=True, env=_env(), timeout=timeout, creationflags=NO_WINDOW)
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"逾時（{timeout} 秒）：{os.path.basename(cmd[1] if cmd[0] == sys.executable else cmd[0])}")
     out, err = (b.decode("utf-8", "replace") for b in (r.stdout, r.stderr))
@@ -354,6 +359,7 @@ class Busy(Exception):
 
 
 GEN_LOCK, PREVIEW_LOCK = threading.Lock(), threading.Lock()
+LAST_SEEN = [time.monotonic()]  # 最後一次收到請求的時間（--app 閒置自動關用）
 STATE = {"exhausted_day": None}  # 今天收過每日額度 429 → 記太平洋日期
 _VOICES = {}
 
@@ -526,6 +532,7 @@ class Handler(BaseHTTPRequestHandler):
         if post and not secrets.compare_digest(self.headers.get("X-Token", ""), TOKEN):
             self._send(403, {"error": "token 不符，請重新整理頁面"})
             return False
+        LAST_SEEN[0] = time.monotonic()
         return True
 
     def _dispatch(self, fn, *a):
@@ -561,6 +568,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/":
             with open(os.path.join(HERE, "ui.html"), encoding="utf-8") as f:
                 return self._send(200, f.read().replace("__TOKEN__", TOKEN).encode("utf-8"), "text/html; charset=utf-8")
+        if u.path == "/api/ping":
+            return self._send(200, {"ok": True})
         if u.path == "/api/roles":
             return self._dispatch(lambda: {"roles": list_roles()})
         if u.path == "/api/state":
@@ -586,19 +595,106 @@ class Handler(BaseHTTPRequestHandler):
         self._dispatch(fn, p)
 
 
-def serve(port: int, open_browser: bool):
+class _Server(ThreadingHTTPServer):
+    allow_reuse_address = sys.platform != "win32"  # Windows 的 SO_REUSEADDR 會讓第二份也綁上同一埠，token 互打架
+
+
+def idle_watch(srv, idle_secs: float, poll: float = 15.0):
+    """--app：視窗關了網頁就不再 ping，閒置 idle_secs 秒就關伺服器（生成中不關）。"""
+    while True:
+        time.sleep(poll)
+        if time.monotonic() - LAST_SEEN[0] > idle_secs and not GEN_LOCK.locked():
+            srv.shutdown()
+            return
+
+
+def _find_edge():
+    for v in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
+        p = os.path.join(os.environ.get(v, ""), "Microsoft", "Edge", "Application", "msedge.exe")
+        if os.path.isfile(p):
+            return p
+    return shutil.which("msedge")
+
+
+def _activate(title: str) -> bool:
+    """Windows：把已開著、標題是 title 的視窗叫到前面；找到回 True。"""
+    if sys.platform != "win32":
+        return False
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                            f"(New-Object -ComObject WScript.Shell).AppActivate('{title}')"],
+                           capture_output=True, text=True, timeout=15, creationflags=NO_WINDOW)
+        return r.stdout.strip() == "True"
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def open_ui(url: str, app: bool, reuse: bool = False):
+    """app＝Edge 應用程式模式（無分頁、無網址列的獨立視窗）；找不到 Edge 就退回預設瀏覽器。"""
+    if app and reuse and _activate("聲音實驗室"):
+        return
+    edge = _find_edge() if app else None
+    if edge:
+        subprocess.Popen([edge, f"--app={url}"], creationflags=NO_WINDOW)
+    else:
+        webbrowser.open(url)
+
+
+def shortcut_ps(pyw: str, script: str, root: str) -> str:
+    """建桌面捷徑的 PowerShell 指令（路徑裡的單引號跳脫成兩個）。"""
+    q = lambda s: s.replace("'", "''")  # noqa: E731
+    return ("[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
+            "$d=[Environment]::GetFolderPath('Desktop');$p=Join-Path $d '聲音實驗室.lnk';"
+            "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($p);"
+            f"$s.TargetPath='{q(pyw)}';$s.Arguments='\"{q(script)}\" --app';$s.WorkingDirectory='{q(root)}';"
+            "$s.IconLocation=(Join-Path $env:SystemRoot 'System32\\SndVol.exe')+',0';"
+            "$s.Description='gemini-voice-lab 微調介面';$s.Save();$p")
+
+
+def install_shortcut():
+    if sys.platform != "win32":
+        sys.exit("--install-shortcut 只支援 Windows；其他系統用 python scripts/ui.py 開")
+    pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")  # pythonw：雙擊不跳黑色命令視窗
+    if not os.path.isfile(pyw):
+        pyw = sys.executable
+    print("已建立：" + _run(["powershell", "-NoProfile", "-Command",
+                            shortcut_ps(pyw, os.path.abspath(__file__), ROOT)], timeout=30).strip())
+
+
+def ui_alive(port: int) -> bool:
+    """這個埠上是不是已經有一份本介面在跑（GET /api/roles 回得來）。"""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/roles", timeout=2) as r:
+            return r.status == 200 and "roles" in json.loads(r.read())
+    except (OSError, ValueError):
+        return False
+
+
+def serve(port: int, open_browser: bool, app: bool = False, idle_secs: float = 0):
     os.makedirs(LAB, exist_ok=True)
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    p = srv.server_address[1]
-    ALLOWED_HOSTS.update({f"127.0.0.1:{p}", f"localhost:{p}"})
-    url = f"http://127.0.0.1:{p}/"
+    url = f"http://127.0.0.1:{port}/"
+    try:
+        srv = _Server(("127.0.0.1", port), Handler)
+    except OSError:
+        if not ui_alive(port):
+            sys.exit(f"埠 {port} 被別的程式占用；改用 --port 換一個")
+        print(f"介面已經在跑：{url}", flush=True)  # 單一實例：只叫出視窗，不開第二份
+        if open_browser:
+            open_ui(url, app, reuse=True)
+        return
+    ALLOWED_HOSTS.update({f"127.0.0.1:{port}", f"localhost:{port}"})
     print(f"聲音實驗室介面：{url}　（Ctrl+C 結束）", flush=True)
     if open_browser:
-        webbrowser.open(url)
+        open_ui(url, app)
+    if idle_secs:
+        threading.Thread(target=idle_watch, args=(srv, idle_secs), daemon=True).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        srv.server_close()
 
 
 # ---------- 自檢 ----------
@@ -881,6 +977,43 @@ def _check_http(tmp):
     srv.server_close()
 
 
+def _check_desktop(tmp):
+    srv = _Server(("127.0.0.1", 0), Handler)
+    port = srv.server_address[1]
+    ALLOWED_HOSTS.update({f"127.0.0.1:{port}", f"localhost:{port}"})
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    assert ui_alive(port)
+    # 單一實例：第二份綁同一埠要失敗（Windows 的 SO_REUSEADDR 會讓它綁得上）
+    try:
+        _Server(("127.0.0.1", port), Handler).server_close()
+        raise AssertionError("同一埠不該綁得上第二份")
+    except OSError:
+        pass
+    # 網頁每 30 秒 GET /api/ping；任何請求都重設閒置計時
+    LAST_SEEN[0] = 0.0
+    import urllib.request
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=5) as r:
+        assert r.status == 200
+    assert LAST_SEEN[0] > 0
+    # 閒置自動關：生成中不關；鎖放開後閒置超時就關
+    GEN_LOCK.acquire()
+    try:
+        w = threading.Thread(target=idle_watch, args=(srv, 0.2, 0.05), daemon=True)
+        w.start()
+        w.join(0.6)
+        assert w.is_alive(), "生成中不該關"
+    finally:
+        GEN_LOCK.release()
+    w.join(3)
+    assert not w.is_alive(), "閒置超時應關閉伺服器"
+    srv.server_close()
+    assert not ui_alive(port)
+    # 捷徑指令：路徑裡的單引號要跳脫，指向 --app
+    ps = shortcut_ps("C:\\Py\\pythonw.exe", "D:\\x'y\\scripts\\ui.py", "D:\\x'y")
+    assert "D:\\x''y\\scripts\\ui.py" in ps and "--app" in ps and "聲音實驗室.lnk" in ps and "SndVol.exe" in ps
+    assert ps.startswith("[Console]::OutputEncoding")  # 回傳的路徑要是 UTF-8，不然中文檔名印成亂碼
+
+
 def selfcheck():
     global LAB
     tmp = tempfile.mkdtemp(prefix="gvl_ui_check_")
@@ -889,6 +1022,7 @@ def selfcheck():
         _check_core(tmp)
         _check_post(tmp)
         _check_http(tmp)
+        _check_desktop(tmp)
         print("selfcheck OK")
     finally:
         LAB = old
@@ -899,12 +1033,17 @@ def main():
     ap = argparse.ArgumentParser(description="gemini-voice-lab 本機微調介面")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true", help="不自動開瀏覽器")
+    ap.add_argument("--app", action="store_true", help="Edge 獨立視窗開；視窗關掉 3 分鐘後自動結束（桌面捷徑用）")
+    ap.add_argument("--install-shortcut", action="store_true", help="在桌面建「聲音實驗室」捷徑（Windows）")
     ap.add_argument("--selfcheck", action="store_true", help="離線自檢（不連網、0 額度）")
     a = ap.parse_args()
     if a.selfcheck:
         selfcheck()
         return
-    serve(a.port, not a.no_browser)
+    if a.install_shortcut:
+        install_shortcut()
+        return
+    serve(a.port, not a.no_browser, app=a.app, idle_secs=180 if a.app else 0)
 
 
 if __name__ == "__main__":

@@ -44,7 +44,10 @@ python scripts\tts_gemini.py --cues examples\範例角色\cues.txt --styles exam
 ```powershell
 python scripts\ui.py               # 開 http://127.0.0.1:8765/（--port 改埠、--no-browser 不自動開）
 python scripts\ui.py --selfcheck   # 離線自檢（不連網、0 次請求）
+python scripts\ui.py --install-shortcut   # Windows：桌面建「聲音實驗室」捷徑（Edge 獨立視窗、不跳黑窗）
 ```
+
+桌面捷徑：已經開著時再點只會叫出視窗、不會開第二份；關掉視窗約 3 分鐘後伺服器自己結束。沒有主控台時的訊息寫在 `lab\.ui.log`。
 
 左邊改音色／底色／配音譜後按「生成」（每按一次用 1 次請求，固定 `--one-request`）；右邊用滑桿調音高、語速、句間停頓、音量（本機後製，不花請求，需 `numpy`）。每輪自動記進 `lab\<角色>\回合日誌.md`，評語直接在頁面上打。介面只綁本機、不改 `learnings/rules.md`——規則歸納仍照 `SKILL.md` 做。
 
