@@ -245,6 +245,79 @@ def save_last(d: str, cur: dict):
         json.dump(cur, f, ensure_ascii=False, indent=1)
 
 
+# ---------- 子程序與後製（0 額度） ----------
+def _env(extra=None) -> dict:
+    return {**os.environ, "PYTHONUTF8": "1", **(extra or {})}
+
+
+def _run(cmd: list, timeout=600) -> str:
+    """跑子程序；非 0 → RuntimeError（訊息＝stderr 末段，tts_gemini／ffmpeg 本身已是可讀訊息）。回 stdout。"""
+    try:
+        r = subprocess.run(cmd, capture_output=True, env=_env(), timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"逾時（{timeout} 秒）：{os.path.basename(cmd[1] if cmd[0] == sys.executable else cmd[0])}")
+    out, err = (b.decode("utf-8", "replace") for b in (r.stdout, r.stderr))
+    if r.returncode != 0:
+        raise RuntimeError((err.strip() or out.strip() or f"exit {r.returncode}")[-600:])
+    return out
+
+
+FX_RANGE = {"semitones": (-3.0, 3.0, 0.0), "tempo": (0.8, 1.2, 1.0), "pause_add": (0.0, 1.0, 0.0), "gain_db": (-6.0, 6.0, 0.0)}
+
+
+def fx_params(p: dict) -> dict:
+    """前端滑桿值 → 夾在範圍內的 float；缺值用預設；非數字 → ValueError。"""
+    out = {}
+    for k, (lo, hi, dv) in FX_RANGE.items():
+        try:
+            v = float(p.get(k, dv))
+        except (TypeError, ValueError):
+            raise ValueError(f"{k} 不是數字")
+        if not math.isfinite(v):
+            raise ValueError(f"{k} 不是數字")
+        out[k] = min(hi, max(lo, v))
+    return out
+
+
+def postfx_filter(semitones=0.0, tempo=1.0, gain_db=0.0) -> str:
+    """ffmpeg -af 字串；全為預設 → ""。formant=preserved：升降調不變花栗鼠。"""
+    parts = []
+    if abs(semitones) > 1e-9 or abs(tempo - 1.0) > 1e-9:
+        parts.append(f"rubberband=pitch={2 ** (semitones / 12):.4f}:tempo={tempo:.4f}:formant=preserved")
+    if abs(gain_db) > 1e-9:
+        parts.append(f"volume={gain_db:g}dB")
+    return ",".join(parts)
+
+
+def render_post(src: str, out: str, semitones=0.0, tempo=1.0, pause_add=0.0, gain_db=0.0):
+    """停頓（stretch_pauses.py）→ 音高／語速／音量（ffmpeg）→ out。試聽與存檔共用，試聽即成品。"""
+    tmp = tempfile.mkdtemp(prefix="gvl_ui_")
+    try:
+        cur = src
+        if pause_add > 0:
+            cur = os.path.join(tmp, "stretched.wav")
+            _run([sys.executable, os.path.join(HERE, "stretch_pauses.py"), "--in", src, "--out", cur,
+                  "--add", f"{pause_add:g}", "--min", "0.5"])
+        af = postfx_filter(semitones, tempo, gain_db)
+        codec = ["-q:a", "2"] if out.lower().endswith(".mp3") else []
+        _run(["ffmpeg", "-y", "-v", "error", "-i", cur, *(["-af", af] if af else []), *codec, out])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def post_summary(src_name: str, fx: dict) -> str:
+    parts = []
+    if fx["semitones"]:
+        parts.append(f"音高 {fx['semitones']:+g} 半音")
+    if fx["tempo"] != 1.0:
+        parts.append(f"語速 {fx['tempo']:.2f}×")
+    if fx["pause_add"]:
+        parts.append(f"停頓 +{fx['pause_add']:.2f} 秒")
+    if fx["gain_db"]:
+        parts.append(f"音量 {fx['gain_db']:+g} dB")
+    return f"後製 {src_name}：" + ("、".join(parts) if parts else "無變更（轉檔）")
+
+
 # ---------- 自檢 ----------
 def _check_core(tmp):
     # 名稱防護
@@ -326,12 +399,66 @@ def _check_core(tmp):
     assert load_last(d) == p and load_last(tmp) == {}
 
 
+def _tone_wav(path):
+    """0.6 秒 440Hz ＋ 0.8 秒靜音 ＋ 0.6 秒 440Hz，24k mono 16-bit。"""
+    import wave
+    sr = 24000
+    tone = [int(8000 * math.sin(2 * math.pi * 440 * i / sr)) for i in range(int(sr * 0.6))]
+    pcm = tone + [0] * int(sr * 0.8) + tone
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(b"".join(x.to_bytes(2, "little", signed=True) for x in pcm))
+
+
+def _check_post(tmp):
+    import wave
+
+    def dur(p):
+        with wave.open(p) as w:
+            return w.getnframes() / w.getframerate()
+    d = os.path.join(tmp, "後製角色")
+    os.makedirs(d)
+    src = os.path.join(d, "src.wav")
+    _tone_wav(src)
+    assert postfx_filter() == ""
+    assert postfx_filter(semitones=1) == "rubberband=pitch=1.0595:tempo=1.0000:formant=preserved"
+    assert postfx_filter(gain_db=-2) == "volume=-2dB"
+    out = os.path.join(d, "a.wav")
+    render_post(src, out)                      # 全預設＝直接轉檔
+    assert abs(dur(out) - 2.0) < 0.02, dur(out)
+    render_post(src, out, tempo=1.2)           # 快 1.2× → 約 1.67 秒
+    assert abs(dur(out) - 2.0 / 1.2) < 0.05, dur(out)
+    render_post(src, out, pause_add=0.3)       # 0.8 秒空白 +0.3 → 2.3 秒
+    assert abs(dur(out) - 2.3) < 0.03, dur(out)
+    mp3 = os.path.join(d, "b.mp3")
+    render_post(src, mp3, semitones=1, gain_db=-2)
+    assert os.path.getsize(mp3) > 1000
+    try:
+        render_post(os.path.join(d, "沒這個.wav"), out)
+        raise AssertionError("來源不存在應失敗")
+    except RuntimeError:
+        pass
+    assert fx_params({"semitones": 9, "tempo": "1.1"}) == {"semitones": 3.0, "tempo": 1.1, "pause_add": 0.0, "gain_db": 0.0}
+    for bad in ({"tempo": "快"}, {"gain_db": None}, {"semitones": float("nan")}):
+        try:
+            fx_params(bad)
+            raise AssertionError(f"{bad} 不該通過")
+        except ValueError:
+            pass
+    assert post_summary("r01.mp3", fx_params({})) == "後製 r01.mp3：無變更（轉檔）"
+    assert post_summary("r01.mp3", fx_params({"semitones": 0.5, "pause_add": 0.3})) == "後製 r01.mp3：音高 +0.5 半音、停頓 +0.30 秒"
+    assert post_summary("r01.mp3", fx_params({"tempo": 0.9, "gain_db": -2})) == "後製 r01.mp3：語速 0.90×、音量 -2 dB"
+
+
 def selfcheck():
     global LAB
     tmp = tempfile.mkdtemp(prefix="gvl_ui_check_")
     old, LAB = LAB, tmp
     try:
         _check_core(tmp)
+        _check_post(tmp)
         print("selfcheck OK")
     finally:
         LAB = old
