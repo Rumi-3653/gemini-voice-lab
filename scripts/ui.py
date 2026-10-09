@@ -22,7 +22,7 @@ import sys
 import tempfile
 import threading
 import webbrowser
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -38,7 +38,15 @@ except ImportError as e:
 LAB = os.path.join(ROOT, "lab")  # selfcheck 會暫時換成暫存夾
 TEMPLATE_LOG = os.path.join(ROOT, "examples", "範例角色", "回合日誌.md")
 LOG_NAME, LAST_NAME, PREVIEW_NAME = "回合日誌.md", ".ui_last.json", ".preview.mp3"
-PT, TW = ZoneInfo("America/Los_Angeles"), ZoneInfo("Asia/Taipei")
+def _zones(zi=ZoneInfo):
+    """Windows 的 Python 沒內建 IANA 時區庫，要 pip 裝 tzdata；缺了就講清楚再退出。"""
+    try:
+        return zi("America/Los_Angeles"), zi("Asia/Taipei")
+    except ZoneInfoNotFoundError as e:
+        sys.exit(f"缺時區資料（{e}）：pip install tzdata")
+
+
+PT, TW = _zones()
 FLASH_DAILY, FLASH_RESERVE = 10, 2
 AUDIO_EXT = (".mp3", ".wav", ".m4a")
 BAD_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -79,9 +87,17 @@ def _read_lines(path) -> list:
         return f.read().splitlines()
 
 
+def _write_text(path, text: str):
+    """先編碼、寫暫存檔再 os.replace：編碼或寫入失敗都不會把原檔截成空的（lab\\ 不進 git，壞了救不回）。"""
+    data = text.encode("utf-8")
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
 def _write_lines(path, lines):
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(lines) + "\n")
+    _write_text(path, "\n".join(lines) + "\n")
 
 
 def _split_row(line: str) -> list:
@@ -196,6 +212,19 @@ def flash_used(rows: list, now=None) -> int:
     return n
 
 
+def flash_used_all(now=None) -> int:
+    """額度是整把 key 共用：lab\\ 底下所有角色日誌的 flash 列加總（讀不了的日誌略過）。"""
+    n = 0
+    for r in list_roles():
+        path = os.path.join(LAB, r, LOG_NAME)
+        if os.path.exists(path):
+            try:
+                n += flash_used(read_rounds(path), now)
+            except (ValueError, OSError):
+                pass
+    return n
+
+
 def reset_at(now=None) -> str:
     """下一次額度重置的台灣時間 HH:MM（PDT 15:00、PST 16:00）。"""
     n = now or now_tw()
@@ -243,8 +272,7 @@ def load_last(d: str) -> dict:
 
 
 def save_last(d: str, cur: dict):
-    with open(os.path.join(d, LAST_NAME), "w", encoding="utf-8") as f:
-        json.dump(cur, f, ensure_ascii=False, indent=1)
+    _write_text(os.path.join(d, LAST_NAME), json.dumps(cur, ensure_ascii=False, indent=1))
 
 
 # ---------- 子程序與後製（0 額度） ----------
@@ -349,10 +377,8 @@ def _gen_params(p: dict) -> dict:
 
 
 def save_inputs(d: str, g: dict):
-    with open(os.path.join(d, "cues.txt"), "w", encoding="utf-8", newline="\n") as f:
-        f.write(g["cues"].replace("\r\n", "\n"))
-    with open(os.path.join(d, "styles.txt"), "w", encoding="utf-8", newline="\n") as f:
-        f.write(join_styles(g["base"], g["styles"].replace("\r\n", "\n")))
+    _write_text(os.path.join(d, "cues.txt"), g["cues"].replace("\r\n", "\n"))
+    _write_text(os.path.join(d, "styles.txt"), join_styles(g["base"], g["styles"].replace("\r\n", "\n")))
 
 
 def tts_cmd(d: str, g: dict, out: str, dry: bool) -> list:
@@ -380,7 +406,7 @@ def get_state(role: str) -> dict:
     return {"cues": read("cues.txt"), "base": base, "styles": styles, "last": last,
             "voice": last.get("voice") or "Sulafat", "model": last.get("model") or "flash",
             "rounds": rows, "log_error": log_error, "audio": list_audio(d), "next": next_round(d, rows),
-            "used": flash_used(rows), "daily": FLASH_DAILY, "reserve": FLASH_RESERVE,
+            "used": flash_used_all(), "daily": FLASH_DAILY, "reserve": FLASH_RESERVE,
             "exhausted": STATE["exhausted_day"] == pt_day(now_tw()), "reset": reset_at()}
 
 
@@ -421,7 +447,7 @@ def do_generate(p: dict) -> dict:
                 STATE["exhausted_day"] = pt_day(now_tw())
             raise
         flash = g["model"] == "flash"
-        used = flash_used(rows) + (1 if flash else 0)
+        used = flash_used_all() + (1 if flash else 0)
         append_round(log, {"輪": rnd, "日期": now_tw().strftime("%Y-%m-%d %H:%M"), "模型": g["model"],
                            "flash": f"{used}/{FLASH_DAILY}" if flash else "-", "只改了什麼": diff_params(load_last(d), g)})
         save_last(d, g)
@@ -452,12 +478,17 @@ def do_save(p: dict) -> dict:
     d = role_dir(p.get("role", ""))
     name, src = _src(d, p)
     fx = fx_params(p)
-    log = ensure_log(d)
-    rnd = next_round(d, read_rounds(log))
-    render_post(src, os.path.join(d, rnd + ".mp3"), **fx)
-    append_round(log, {"輪": rnd, "日期": now_tw().strftime("%Y-%m-%d %H:%M"), "模型": "後製", "flash": "-",
-                       "只改了什麼": post_summary(name, fx)})
-    return {"round": rnd, "file": rnd + ".mp3"}
+    if not GEN_LOCK.acquire(blocking=False):  # 生成中 rNN.mp3 還沒落地，搶號會撞同一輪
+        raise Busy("生成還在跑，等它完成再存檔（試聽照常可用）")
+    try:
+        log = ensure_log(d)
+        rnd = next_round(d, read_rounds(log))
+        render_post(src, os.path.join(d, rnd + ".mp3"), **fx)
+        append_round(log, {"輪": rnd, "日期": now_tw().strftime("%Y-%m-%d %H:%M"), "模型": "後製", "flash": "-",
+                           "只改了什麼": post_summary(name, fx)})
+        return {"round": rnd, "file": rnd + ".mp3"}
+    finally:
+        GEN_LOCK.release()
 
 
 def do_comment(p: dict) -> dict:
@@ -649,6 +680,24 @@ def _check_core(tmp):
     assert diff_params(p, dict(p)) == "沒改（重抽）"
     save_last(d, p)
     assert load_last(d) == p and load_last(tmp) == {}
+    # 寫檔失敗（孤立 surrogate 編碼不了）不可把日誌截成空的
+    snap = _read_lines(log)
+    try:
+        set_comment(log, "r01", "壞字\ud83d")
+        raise AssertionError("孤立 surrogate 應失敗")
+    except ValueError:
+        pass
+    assert _read_lines(log) == snap
+    # Windows 沒裝 tzdata：明確叫人 pip install，不是 import 就炸 traceback
+
+    class NoTz:
+        def __init__(self, key):
+            raise ZoneInfoNotFoundError(key)
+    try:
+        _zones(NoTz)
+        raise AssertionError("沒有時區資料應退出")
+    except SystemExit as e:
+        assert "tzdata" in str(e)
 
 
 def _tone_wav(path):
@@ -743,7 +792,10 @@ def _check_http(tmp):
         assert st == 200 and "DRY-RUN" in j["table"], j
         s = state()
         assert s["base"] == "calm" and s["styles"] == "平穩: soft" and s["cues"] == form["cues"]
-        assert s["rounds"] == [] and s["next"] == "r01" and s["used"] == 0 and s["daily"] == FLASH_DAILY
+        assert s["rounds"] == [] and s["next"] == "r01" and s["daily"] == FLASH_DAILY
+        base_used = s["used"]  # 其他自檢角色的 flash 列也算（額度是整把 key 共用）
+        assert req("POST", "/api/dryrun", dict(form, cues="壞\ud83d"))[0] == 400
+        assert state()["cues"] == form["cues"]  # 寫不進去也不可把 cues.txt 截空
         assert req("POST", "/api/dryrun", dict(form, voice="--evil"))[0] == 400
         assert req("POST", "/api/dryrun", dict(form, model="pro"))[0] == 400
         assert req("POST", "/api/dryrun", dict(form, role="../x"))[0] == 400
@@ -757,13 +809,20 @@ def _check_http(tmp):
             return "OK x (1 KB, 2.0s, 2 beats, gemini / Sulafat)\n"
         _run, need_key = fake_run, (lambda: None)
         st, j = req("POST", "/api/generate", form)
-        assert st == 200 and j == {"round": "r01", "file": "r01.mp3", "beats": 2, "used": 1}, j
+        assert st == 200 and j == {"round": "r01", "file": "r01.mp3", "beats": 2, "used": base_used + 1}, j
         assert "--one-request" in calls[-1] and "--dry-run" not in calls[-1]
         st, j = req("POST", "/api/generate", dict(form, base="warm"))
-        assert st == 200 and j["round"] == "r02" and j["used"] == 2, j
+        assert st == 200 and j["round"] == "r02" and j["used"] == base_used + 2, j
         s = state()
-        assert [(r["輪"], r["flash"], r["只改了什麼"]) for r in s["rounds"]] == [("r01", "1/10", "基線"), ("r02", "2/10", "底色")]
-        assert s["used"] == 2 and s["last"]["base"] == "warm"
+        assert [(r["輪"], r["flash"], r["只改了什麼"]) for r in s["rounds"]] == [
+            ("r01", f"{base_used + 1}/10", "基線"), ("r02", f"{base_used + 2}/10", "底色")]
+        assert s["used"] == base_used + 2 and s["last"]["base"] == "warm"
+        # 別的角色今天用掉的 flash 也要算進來
+        other = os.path.join(tmp, "別的角色")
+        os.makedirs(other)
+        append_round(ensure_log(other), {"輪": "r01", "日期": now_tw().strftime("%Y-%m-%d %H:%M"), "模型": "flash"})
+        base_used += 1
+        assert state()["used"] == base_used + 2
         # 連點：生成中第二個請求 409
         GEN_LOCK.acquire()
         try:
@@ -794,6 +853,12 @@ def _check_http(tmp):
         _run, need_key = real_run, real_key
     # 後製（真 ffmpeg）＋評語＋音檔供應
     _tone_wav(os.path.join(d, "src.wav"))
+    # 生成中不可存檔：tts_gemini 最後才寫 rNN.mp3，同時存檔會搶到同一個輪次編號
+    GEN_LOCK.acquire()
+    try:
+        assert req("POST", "/api/save", {"role": role, "src": "src.wav"})[0] == 409
+    finally:
+        GEN_LOCK.release()
     st, j = req("POST", "/api/preview", {"role": role, "src": "src.wav", "semitones": 0.5})
     assert st == 200 and j == {"file": PREVIEW_NAME}, j
     st, j = req("POST", "/api/save", {"role": role, "src": "src.wav", "pause_add": 0.3})
@@ -805,7 +870,7 @@ def _check_http(tmp):
     s = state()
     last = s["rounds"][-1]
     assert (last["輪"], last["模型"], last["只改了什麼"], last["使用者原話"]) == ("r03", "後製", "後製 src.wav：停頓 +0.30 秒", "停頓剛好")
-    assert s["used"] == 2 and "r03.mp3" in s["audio"] and PREVIEW_NAME not in s["audio"]
+    assert s["used"] == base_used + 2 and "r03.mp3" in s["audio"] and PREVIEW_NAME not in s["audio"]
     st, raw = req("GET", f"/audio/{quote(role)}/r03.mp3")
     assert st == 200 and len(raw) > 1000
     assert req("GET", f"/audio/{quote(role)}/{quote(PREVIEW_NAME)}")[0] == 200

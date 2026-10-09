@@ -163,8 +163,10 @@ function loadSrc() {
   $("pvstate").textContent = "";
 }
 let pvSeq = 0;
+function resetFx() { $("pitch").value = 0; $("tempo").value = 1; $("pause").value = 0; $("gain").value = 0; showFx(); }
 async function preview() {
   if (!$("src").value) return;
+  err("");
   const seq = ++pvSeq;
   $("pvstate").textContent = "（產生中…）";
   try {
@@ -176,7 +178,6 @@ async function preview() {
   } catch (e) { if (seq === pvSeq) { $("pvstate").textContent = ""; err(e); } }
 }
 async function loadState() {
-  err("");
   S = await api(`/api/state?role=${encodeURIComponent(role())}`);
   setSel($("voice"), S.voice);
   $("model").value = S.model;
@@ -195,11 +196,15 @@ async function loadState() {
 for (const id of ["pitch", "tempo", "pause", "gain"]) { $(id).oninput = showFx; $(id).onchange = preview; }
 for (const id of ["voice", "model", "base", "cues", "styles"]) $(id).addEventListener("input", showDiff);
 $("src").onchange = loadSrc;
-$("reset0").onclick = () => { $("pitch").value = 0; $("tempo").value = 1; $("pause").value = 0; $("gain").value = 0; showFx(); preview(); };
+$("reset0").onclick = () => { resetFx(); preview(); };
 $("save").onclick = async () => {
   if (!$("src").value) return err("先選來源檔");
-  $("save").disabled = true;
-  try { const j = await api("/api/save", {role: role(), src: $("src").value, ...fx()}); await loadState(); $("src").value = j.file; loadSrc(); }
+  err(""); $("save").disabled = true;
+  try {
+    const j = await api("/api/save", {role: role(), src: $("src").value, ...fx()});
+    await loadState();
+    $("src").value = j.file; resetFx(); loadSrc();  // 新檔已含這次的調整，滑桿歸零免得下一輪疊兩次
+  }
   catch (e) { err(e); }
   finally { $("save").disabled = false; }
 };
@@ -232,7 +237,7 @@ $("gen").onclick = async () => {
     if (!r.roles.length) return err("lab\\ 底下還沒有角色資料夾。先照 SKILL.md 第 1 階段建一個（例如把 examples\\範例角色 整夾複製到 lab\\）。");
     for (const x of r.roles) $("role").add(new Option(x, x));
     try { const saved = localStorage.getItem("gvl-role"); if (saved && r.roles.includes(saved)) $("role").value = saved; } catch {}
-    $("role").onchange = () => { try { localStorage.setItem("gvl-role", role()); } catch {} loadState().catch(err); };
+    $("role").onchange = () => { try { localStorage.setItem("gvl-role", role()); } catch {} err(""); loadState().catch(err); };
     await loadVoices().catch(e => err("音色清單讀不到：" + e.message));
     await loadState();
   } catch (e) { err(e); }

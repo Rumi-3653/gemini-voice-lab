@@ -14,7 +14,8 @@ Gemini TTS 只有三支把手：**voice**（音色人設／口音，建一次）
 
 - Python 3.10+
 - `pip install google-genai`
-- ffmpeg（在 PATH 上；輸出 mp3／m4a 與重採樣會用到）
+- ffmpeg（在 PATH 上；輸出 mp3／m4a 與重採樣會用到；微調介面的音高／語速需含 rubberband 的版本）
+- 微調介面另需：`pip install numpy`（後製拉停頓）；Windows 再加 `pip install tzdata`（額度日界要時區資料）
 - `GEMINI_API_KEY` 環境變數（到 <https://aistudio.google.com/apikey> 建一把；Windows：`setx GEMINI_API_KEY "你的key"` 後開新終端。金鑰不要寫進任何檔案）
 
 ## 30 秒上手
@@ -97,5 +98,5 @@ gemini-voice-lab/
 - **Voices**: design a character voice or replicate your own (consent-gated, yourself only) in AI Studio's web UI, or via `scripts/voices.py` (list/get/delete/design/replicate/probe).
 - **Rules library**: every comment is written back to `learnings/rules.md` (trial -> confirmed after a second check on a different sentence; overturned entries are kept).
 - **Local UI (optional)**: `python scripts/ui.py` opens a localhost-only page to regenerate (one request per click) and to post-tune pitch, tempo, pauses and volume for free; every round is logged to the character's round log.
-- **Requirements**: Python 3.10+, `pip install google-genai`, ffmpeg, `GEMINI_API_KEY`. Run `python scripts/voices.py --selfcheck` (offline) and a `--dry-run` first.
+- **Requirements**: Python 3.10+, `pip install google-genai`, ffmpeg, `GEMINI_API_KEY` (the local UI also needs `numpy`, an ffmpeg build with rubberband, and `tzdata` on Windows). Run `python scripts/voices.py --selfcheck` (offline) and a `--dry-run` first.
 - **License**: MIT.
