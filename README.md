@@ -36,6 +36,17 @@ python scripts\tts_gemini.py --cues examples\範例角色\cues.txt --styles exam
 
 聽完 r01，回一句評語（例如「尾音太拖」），照 `SKILL.md` 的「評語→把手對照表」處理下一輪。中文內容一律放 UTF-8 檔（`--cues`／`--styles`／`--desc-file`），不要塞進命令列參數。
 
+## 微調介面（選用）
+
+不想打指令的話，開本機網頁：
+
+```powershell
+python scripts\ui.py               # 開 http://127.0.0.1:8765/（--port 改埠、--no-browser 不自動開）
+python scripts\ui.py --selfcheck   # 離線自檢（不連網、0 次請求）
+```
+
+左邊改音色／底色／配音譜後按「生成」（每按一次用 1 次請求，固定 `--one-request`）；右邊用滑桿調音高、語速、句間停頓、音量（本機後製，不花請求，需 `numpy`）。每輪自動記進 `lab\<角色>\回合日誌.md`，評語直接在頁面上打。介面只綁本機、不改 `learnings/rules.md`——規則歸納仍照 `SKILL.md` 做。
+
 ## 兩種造聲
 
 預設走 **API**（`voices.py design`／`replicate`，免費層實測可建、`language_code: cmn-TW` 可收）。AI Studio 網頁版（<https://aistudio.google.com/generate-speech>）的 Voice Design **需付費層 key**，免費 key 進不去（2026-10-05 實測）；網頁版 Playground 只拿來當 flash 額度用完後的生成備援（有 Google AI Pro 者配額較高）。
@@ -62,6 +73,8 @@ gemini-voice-lab/
 ├── scripts/
 │   ├── tts_gemini.py     合成引擎（配音譜、風格表、--one-request、--dry-run、SRT）
 │   ├── cues.py           配音譜解析（純函式）
+│   ├── stretch_pauses.py 後製：拉長句間空白（0 次請求）
+│   ├── ui.py / ui.html   本機微調介面（生成＋後製＋回合日誌）；--selfcheck 離線自檢
 │   └── voices.py         自建音色的列／查／刪／建／探針；--selfcheck 離線自檢
 ├── learnings/            規則庫（rules.md）、API 事實（api-facts.md）、schema（README.md）
 ├── examples/範例角色/     可直接跑的起手範本：基準稿、cues、styles、空白回合日誌
@@ -83,5 +96,6 @@ gemini-voice-lab/
 - **Three handles**: voice (persona/accent, built once), style (one short sentence per segment), text (verbatim wording, replacements, inline tags). A listener's one-line comment is mapped to exactly one of them.
 - **Voices**: design a character voice or replicate your own (consent-gated, yourself only) in AI Studio's web UI, or via `scripts/voices.py` (list/get/delete/design/replicate/probe).
 - **Rules library**: every comment is written back to `learnings/rules.md` (trial -> confirmed after a second check on a different sentence; overturned entries are kept).
+- **Local UI (optional)**: `python scripts/ui.py` opens a localhost-only page to regenerate (one request per click) and to post-tune pitch, tempo, pauses and volume for free; every round is logged to the character's round log.
 - **Requirements**: Python 3.10+, `pip install google-genai`, ffmpeg, `GEMINI_API_KEY`. Run `python scripts/voices.py --selfcheck` (offline) and a `--dry-run` first.
 - **License**: MIT.
