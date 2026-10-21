@@ -40,6 +40,8 @@ legend{padding:0 4px}
 .ab{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
 .ab select{width:auto;max-width:10em}
 .small{font-size:12px}
+.drop{border:2px dashed var(--line);text-align:center;cursor:pointer;margin-bottom:12px}
+.drop:hover,.drop:focus,.drop.over{border-color:var(--accent);background:var(--accentbg);outline:none}
 .bar{position:relative}
 #keybox summary{list-style:none}
 #keybox summary.nokey{background:var(--danger);color:var(--card)}
@@ -65,6 +67,12 @@ legend{padding:0 4px}
     </details>
   </div>
   <div class="err" id="err" role="alert"></div>
+  <section class="card drop" id="drop" tabindex="0" role="button" aria-label="輸入聲音：上傳錄音檔">
+    <b>＋ 輸入聲音</b> <span class="muted">· 把錄音檔拖進視窗，或點這裡選檔（mp3／wav／m4a／flac／ogg／aac，手機錄音也行，可一次多個）</span>
+    <div class="muted small" id="dropout">上傳後可在「後製」微調，或拿去「複製我的聲音」當參考音／授權句</div>
+    <button id="goclone" style="margin-top:6px">複製我的聲音 ↓</button>
+  </section>
+  <input type="file" id="upfile" accept="audio/*,.m4a,.aac" multiple hidden>
   <div class="grid">
     <section class="card">
       <h2>生成 <span class="muted">· 每按一次用 1 次額度</span></h2>
@@ -85,8 +93,7 @@ legend{padding:0 4px}
     </section>
     <section class="card">
       <h2>後製 <span class="muted">· 免費</span></h2>
-      <div class="row"><label class="muted" for="src">來源</label><div style="display:flex;gap:6px"><select id="src"></select><button id="upbtn" title="把你自己的音檔放進這個角色資料夾">上傳音檔…</button></div></div>
-      <input type="file" id="upfile" accept="audio/*,.m4a,.aac" hidden>
+      <div class="row"><label class="muted" for="src">來源</label><select id="src"></select></div>
       <div class="sl">
         <label class="muted" for="pitch">音高</label><input type="range" id="pitch" min="-3" max="3" step="0.5" value="0"><span id="pitchv"></span>
         <label class="muted" for="tempo">語速</label><input type="range" id="tempo" min="0.8" max="1.2" step="0.05" value="1"><span id="tempov"></span>
@@ -99,8 +106,8 @@ legend{padding:0 4px}
       <div style="display:flex;gap:8px;margin-top:8px"><button id="reset0">歸零</button><span style="flex:1"></span><button id="save">存檔</button></div>
     </section>
   </div>
-  <details class="card" style="margin-top:12px">
-    <summary><h2>造聲 <span class="muted">· 建一個專屬音色存進雲端專案 · 今日 <span id="dcount">–</span></span></h2></summary>
+  <section class="card" id="voicebox" style="margin-top:12px">
+    <h2>造聲／複製我的聲音 <span class="muted">· 建一個專屬音色存進雲端專案 · 今日 <span id="dcount">–</span></span></h2>
     <div class="row" style="margin-top:8px">
       <label class="muted" for="dname">代號</label><input type="text" id="dname" placeholder="英數與 - _，例如 narrator-warm-2（中文名寫角色卡）">
       <label class="muted" for="dlang">語言碼</label><input type="text" id="dlang" value="cmn-TW">
@@ -113,21 +120,21 @@ legend{padding:0 4px}
         <textarea id="ddesc" rows="3" placeholder="A man in his 30s with a Taiwanese Mandarin accent, friendly conversational tone, relaxed pace."></textarea>
         <button class="go" id="design" style="margin-top:6px">用描述造聲</button>
       </fieldset>
-      <fieldset>
+      <fieldset id="clonebox">
         <legend>複製我的聲音（只限本人）</legend>
         <div class="row">
           <label class="muted" for="rsrc">參考音</label><select id="rsrc"></select>
           <label class="muted" for="rcon">授權句</label><select id="rcon"></select>
         </div>
-        <div class="muted small">參考音＝自然說話 10~30 秒；授權句＝唸完這句（≥3 秒）：「<span id="ctext"></span>」。手機錄好後用「上傳音檔…」放進來。</div>
+        <div class="muted small">參考音＝自然說話 10~30 秒；授權句＝唸完這句（≥3 秒）：「<span id="ctext"></span>」。手機錄好後用「上傳錄音…」或拖進視窗。</div>
         <label style="display:block;margin:6px 0"><input type="checkbox" id="rown"> 這是我本人的聲音，我同意上傳 Google 建立音色</label>
-        <div style="display:flex;gap:8px"><button id="upbtn2">上傳音檔…</button><button class="go" id="replicate">複製聲音</button></div>
+        <div style="display:flex;gap:8px"><button id="upbtn2">上傳錄音…</button><button class="go" id="replicate">複製聲音</button></div>
       </fieldset>
     </div>
     <pre id="dout" class="muted"></pre>
     <audio id="daudio" controls hidden></audio>
     <div class="muted small">建好會自動選進「音色」，按「生成」才聽得到中文效果（試聽是 Google 的英文示範句）。落選的用 <code>python scripts\voices.py delete &lt;id&gt; --yes</code> 刪；本人複製的 id 別抄進角色卡。</div>
-  </details>
+  </section>
   <section class="card" style="margin-top:12px">
     <h2>回合日誌 <span class="muted">· 評語打完按 Enter 或點別處就存</span></h2>
     <div class="ab">
@@ -353,19 +360,36 @@ $("abPlayB").onclick = () => abPlay("B", false);
 $("abSwap").onclick = () => abPlay(abSide === "A" ? "B" : "A", true);
 
 // ---- 上傳自己的音檔（放進角色資料夾，後製／A/B／複製都能選） ----
-for (const id of ["upbtn", "upbtn2"]) $(id).onclick = () => $("upfile").click();
-$("upfile").onchange = async () => {
-  const file = $("upfile").files[0];
-  $("upfile").value = "";
-  if (!file) return;
+async function uploadFiles(files) {
+  if (!files.length) return;
+  if (!S) return err("先選角色再上傳");
   err("");
+  const done = [];
   try {
-    const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] || ""); r.onerror = () => no(r.error); r.readAsDataURL(file); });
-    const j = await api("/api/upload", {role: role(), name: file.name, data});
-    await loadState();
-    $("src").value = j.file; loadSrc();
+    for (const file of files) {
+      $("dropout").textContent = `上傳中：${file.name}…`;
+      const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] || ""); r.onerror = () => no(r.error); r.readAsDataURL(file); });
+      done.push((await api("/api/upload", {role: role(), name: file.name, data})).file);
+    }
   } catch (e) { err(e); }
+  if (!done.length) return void ($("dropout").textContent = "上傳失敗，看上方紅字");
+  await loadState();
+  const last = done[done.length - 1];
+  $("src").value = last; $("rsrc").value = done[0]; loadSrc();
+  $("dropout").textContent = `已上傳：${done.join("、")}——已選進「後製」來源，可以直接拉滑桿試聽；要複製聲音按下面「複製我的聲音 ↓」`;
+}
+$("drop").onclick = $("upbtn2").onclick = () => $("upfile").click();
+$("goclone").onclick = e => {  // 按鈕在輸入聲音區裡面：別讓它也開選檔視窗
+  e.stopPropagation();
+  $("clonebox").scrollIntoView({behavior: "smooth", block: "center"});
+  $("clonebox").animate([{background: "var(--accentbg)"}, {background: "transparent"}], 1500);
 };
+$("drop").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("upfile").click(); } };
+$("upfile").onchange = () => { const fs = [...$("upfile").files]; $("upfile").value = ""; uploadFiles(fs); };
+// 整個視窗都收拖放；不攔的話 Edge 會直接打開音檔、離開介面
+document.addEventListener("dragover", e => { e.preventDefault(); $("drop").classList.add("over"); });
+document.addEventListener("dragleave", e => { if (!e.relatedTarget) $("drop").classList.remove("over"); });
+document.addEventListener("drop", e => { e.preventDefault(); $("drop").classList.remove("over"); uploadFiles([...e.dataTransfer.files]); });
 
 // ---- 造聲（描述）與複製（本人錄音）：都會在雲端專案建一個音色 ----
 async function createVoice(path, body, btn, what) {
