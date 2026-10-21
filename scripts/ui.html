@@ -40,6 +40,8 @@ legend{padding:0 4px}
 .ab{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
 .ab select{width:auto;max-width:10em}
 .small{font-size:12px}
+.law{margin-top:8px;border-top:1px solid var(--line);padding-top:6px}
+.law ul{margin:4px 0 0;padding-left:18px}
 .drop{border:2px dashed var(--line);text-align:center;cursor:pointer;margin-bottom:12px}
 .drop:hover,.drop:focus,.drop.over{border-color:var(--accent);background:var(--accentbg);outline:none}
 .bar{position:relative}
@@ -69,8 +71,8 @@ legend{padding:0 4px}
   <div class="err" id="err" role="alert"></div>
   <section class="card drop" id="drop" tabindex="0" role="button" aria-label="輸入聲音：上傳錄音檔">
     <b>＋ 輸入聲音</b> <span class="muted">· 把錄音檔拖進視窗，或點這裡選檔（mp3／wav／m4a／flac／ogg／aac，手機錄音也行，可一次多個）</span>
-    <div class="muted small" id="dropout">上傳後可在「後製」微調，或拿去「複製我的聲音」當參考音／授權句</div>
-    <button id="goclone" style="margin-top:6px">複製我的聲音 ↓</button>
+    <div class="muted small" id="dropout">上傳後可在「後製」微調，或拿去「複製聲音」當參考音／授權句</div>
+    <button id="goclone" style="margin-top:6px">複製聲音 ↓</button>
   </section>
   <input type="file" id="upfile" accept="audio/*,.m4a,.aac" multiple hidden>
   <div class="grid">
@@ -107,7 +109,7 @@ legend{padding:0 4px}
     </section>
   </div>
   <section class="card" id="voicebox" style="margin-top:12px">
-    <h2>造聲／複製我的聲音 <span class="muted">· 建一個專屬音色存進雲端專案 · 今日 <span id="dcount">–</span></span></h2>
+    <h2>造聲／複製聲音 <span class="muted">· 建一個專屬音色存進雲端專案 · 今日 <span id="dcount">–</span></span></h2>
     <div class="row" style="margin-top:8px">
       <label class="muted" for="dname">代號</label><input type="text" id="dname" placeholder="英數與 - _，例如 narrator-warm-2（中文名寫角色卡）">
       <label class="muted" for="dlang">語言碼</label><input type="text" id="dlang" value="cmn-TW">
@@ -121,19 +123,29 @@ legend{padding:0 4px}
         <button class="go" id="design" style="margin-top:6px">用描述造聲</button>
       </fieldset>
       <fieldset id="clonebox">
-        <legend>複製我的聲音（只限本人）</legend>
+        <legend>複製聲音（本人，或已取得聲音主人同意）</legend>
         <div class="row">
           <label class="muted" for="rsrc">參考音</label><select id="rsrc"></select>
           <label class="muted" for="rcon">授權句</label><select id="rcon"></select>
         </div>
         <div class="muted small">參考音＝自然說話 10~30 秒；授權句＝唸完這句（≥3 秒）：「<span id="ctext"></span>」。手機錄好後用「上傳錄音…」或拖進視窗。</div>
-        <label style="display:block;margin:6px 0"><input type="checkbox" id="rown"> 這是我本人的聲音，我同意上傳 Google 建立音色</label>
+        <label style="display:block;margin:6px 0"><input type="checkbox" id="rown"> 這是我本人的聲音，或我已取得聲音主人同意（授權句由他本人親自錄）；同意上傳 Google 建立音色</label>
         <div style="display:flex;gap:8px"><button id="upbtn2">上傳錄音…</button><button class="go" id="replicate">複製聲音</button></div>
+        <div class="law muted small">
+          <b>相關規範</b>（台灣法規 2026-10 依全國法規資料庫查證；僅供參考，不是法律意見）
+          <ul>
+            <li><b>Google</b>：Voice replication 要聲音主人親自唸授權句；<a href="https://policies.google.com/terms/generative-ai/use-policy" target="_blank" rel="noopener">生成式 AI 使用政策</a>禁止未揭露地冒充他人來欺騙。</li>
+            <li><b>民法 §18、§195</b>：聲音能辨識一個人，屬人格權保護範圍；未經同意使用，對方可請求除去侵害、賠償損害。</li>
+            <li><b>個人資料保護法 §2、§19</b>：可直接或間接識別個人的資料都算個資，聲音也是；蒐集、利用原則上要當事人同意。</li>
+            <li><b>刑法 §339-4 第 1 項第 4 款</b>：用電腦合成他人不實的影像、聲音來詐騙＝加重詐欺，處 1～7 年有期徒刑，得併科 100 萬元以下罰金。</li>
+            <li><b>著作權法 §7-1</b>：表演受著作權保護；別拿配音員、歌手已發表的錄音當參考音。</li>
+          </ul>
+        </div>
       </fieldset>
     </div>
     <pre id="dout" class="muted"></pre>
     <audio id="daudio" controls hidden></audio>
-    <div class="muted small">建好會自動選進「音色」，按「生成」才聽得到中文效果（試聽是 Google 的英文示範句）。落選的用 <code>python scripts\voices.py delete &lt;id&gt; --yes</code> 刪；本人複製的 id 別抄進角色卡。</div>
+    <div class="muted small">建好會自動選進「音色」，按「生成」才聽得到中文效果（試聽是 Google 的英文示範句）。落選的用 <code>python scripts\voices.py delete &lt;id&gt; --yes</code> 刪；複製來的 id 別抄進角色卡。拿不出同意就別複製，也別拿配音員／歌手已發表的錄音當參考音。</div>
   </section>
   <section class="card" style="margin-top:12px">
     <h2>回合日誌 <span class="muted">· 評語打完按 Enter 或點別處就存</span></h2>
@@ -376,7 +388,7 @@ async function uploadFiles(files) {
   await loadState();
   const last = done[done.length - 1];
   $("src").value = last; $("rsrc").value = done[0]; loadSrc();
-  $("dropout").textContent = `已上傳：${done.join("、")}——已選進「後製」來源，可以直接拉滑桿試聽；要複製聲音按下面「複製我的聲音 ↓」`;
+  $("dropout").textContent = `已上傳：${done.join("、")}——已選進「後製」來源，可以直接拉滑桿試聽；要複製聲音按下面「複製聲音 ↓」`;
 }
 $("drop").onclick = $("upbtn2").onclick = () => $("upfile").click();
 $("goclone").onclick = e => {  // 按鈕在輸入聲音區裡面：別讓它也開選檔視窗
@@ -391,7 +403,7 @@ document.addEventListener("dragover", e => { e.preventDefault(); $("drop").class
 document.addEventListener("dragleave", e => { if (!e.relatedTarget) $("drop").classList.remove("over"); });
 document.addEventListener("drop", e => { e.preventDefault(); $("drop").classList.remove("over"); uploadFiles([...e.dataTransfer.files]); });
 
-// ---- 造聲（描述）與複製（本人錄音）：都會在雲端專案建一個音色 ----
+// ---- 造聲（描述）與複製（本人或已取得同意者的錄音）：都會在雲端專案建一個音色 ----
 async function createVoice(path, body, btn, what) {
   if (!confirm(`${what}：會在雲端專案建立一個音色（今天第 ${S.designs + 1}/${S.design_daily} 個）。\n免費層可建；會不會也算進 flash 次數還沒驗證。\n\n代號：${body.name}`)) return;
   err(""); btn.disabled = true; $("dout").textContent = `${what}中…（約 10～60 秒）`; $("daudio").hidden = true;
@@ -408,8 +420,8 @@ async function createVoice(path, body, btn, what) {
 const vbase = () => ({role: role(), name: $("dname").value.trim(), lang: $("dlang").value.trim()});
 $("design").onclick = () => createVoice("/api/design", {...vbase(), gender: $("dgender").value, desc: $("ddesc").value}, $("design"), "用描述造聲");
 $("replicate").onclick = () => {
-  if (!$("rown").checked) return err("複製只限你本人的聲音：先勾「這是我本人的聲音，我同意上傳 Google 建立音色」");
-  createVoice("/api/replicate", {...vbase(), source: $("rsrc").value, consent: $("rcon").value, own_voice: true}, $("replicate"), "複製聲音");
+  if (!$("rown").checked) return err("複製聲音要是本人，或已取得聲音主人同意（授權句由他本人親自錄）：先勾同意那一格");
+  createVoice("/api/replicate", {...vbase(), source: $("rsrc").value, consent: $("rcon").value, consented: true}, $("replicate"), "複製聲音");
 };
 
 for (const id of ["pitch", "tempo", "pause", "gain"]) { $(id).oninput = showFx; $(id).onchange = preview; }

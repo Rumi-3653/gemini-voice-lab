@@ -4,7 +4,7 @@ description: >-
   Gemini 3.8 Flash TTS 配音的「聲音實驗室」：用回合制把雲端配音調成自然的台灣口語——每回合只燒 1 次請求，
   使用者聽完回一句評語（像大陸腔／太平／尾音拖／唸錯字），Claude 歸到 voice／style／text／cue 其中一支把手，
   查規則庫套處方或開新規則，立刻回寫 learnings；也負責建與管專屬音色（voices.py design 用描述造角色聲——免費層可建、
-  Voice replication 複製使用者本人聲音、voices.py 列／查／刪／到期重建），角色定案回寫角色設定卡。
+  Voice replication 複製本人或已取得同意者的聲音、voices.py 列／查／刪／到期重建），角色定案回寫角色設定卡。
   本 skill 為免費層設計（flash 每天約 10 次請求），額度用完切 AI Studio 網頁版備援。
   觸發：「訓練 Gemini 配音」「配音訓練／配音回合／下一回合／上次練到哪」「聲音實驗室」「設計角色聲音／幫角色做專屬音色」
   「複製我的聲音到 Gemini」「這樣唸不像台灣人／像大陸腔／像播音員／像在朗讀」「音色到期／續期」「今天還剩幾發」「開微調介面」。
@@ -23,7 +23,7 @@ Gemini TTS 只有三支把手：**voice**（人設／口音，建一次）、**s
 2. **一輪只改一件事、只燒 1 發 flash（每次 flash 呼叫必帶 `--one-request`，否則一段一發）、基準稿整個訓練期不換字。** 沒收到評語不開下一發。
 3. **人耳裁定**：好壞由使用者說，Claude 只分類、查表、記錄。
 4. **當場回寫**：收到評語立刻改 `learnings/rules.md` 與回合日誌；不等收工。
-5. **隱私**：`voice_…` ID、同意錄音、本人音檔不進 git（`.gitignore` 已擋 `lab/`、`private/` 與常見音檔副檔名）；角色的 prompted `voice_…` 只寫進該角色的設定卡（若那張卡會公開，先確認可公開）；**使用者本人** replicated 的 ID 只存 repo 外（或 `private\` 內）的私人檔，不進任何角色卡、不進 git。複製聲音只做使用者本人，他人一律拒絕。
+5. **隱私**：`voice_…` ID、同意錄音、本人音檔不進 git（`.gitignore` 已擋 `lab/`、`private/` 與常見音檔副檔名）；角色的 prompted `voice_…` 只寫進該角色的設定卡（若那張卡會公開，先確認可公開）；replicated 的 ID（本人或他人）只存 repo 外（或 `private\` 內）的私人檔，不進任何角色卡、不進 git。複製聲音限**本人，或已取得聲音主人同意且授權句由對方親自錄**；拿不出同意一律拒絕，也不拿配音員／歌手已發表的錄音當參考音（相關法規見 README「Voice replication」）。
 6. **CJK 走檔案**：`--cues`／`--styles`／`--desc-file` 都是 UTF-8 檔；`voices.py --name` 只收 ASCII slug。
 7. **金鑰**：`GEMINI_API_KEY` 環境變數；Windows 下 `voices.py` 會從登錄檔 `HKCU\Environment` 補讀；`tts_gemini` 用 PowerShell 注入（見 r01 指令）；絕不印出。
 
@@ -45,7 +45,7 @@ Gemini TTS 只有三支把手：**voice**（人設／口音，建一次）、**s
 
 - 入口 `https://aistudio.google.com/generate-speech`。用你手上的瀏覽器自動化工具（或手動）操作 AI Studio；需使用者瀏覽器已登入，遇登入牆／驗證就停下交還使用者。
 - **角色 Voice design**：從角色卡的年齡／性別／語氣人設寫 1~2 句英文描述（必含 `Taiwanese Mandarin accent` 與 `conversational` 兩個用語），存 `lab\<角色>\voice\desc-N.txt` → `python scripts\voices.py design --name <slug> --gender female|male|neutral --lang cmn-TW --desc-file <desc> --out <sample.wav>`（免費層實測可建、`cmn-TW` 可收；最後一行 JSON 就是 id，sample 給使用者試聽）→ `python scripts\voices.py list` 確認登錄簿 → 描述原句、id、expire_time 寫進回合日誌「目前最佳」（角色卡等定案才寫）。每角色每天 ≤3 版；落選的 `voices.py delete <id> --yes`。網頁版 Voice Design 只給付費 key，別按 Set up billing。
-- **本人 Voice replication**（只做使用者本人）：先過**同意閘**——Claude 貼出授權句原文（官方僅簡中文本，國語照唸）：「我是此声音的拥有者并授权谷歌使用此声音创建语音合成模型」；使用者在聊天室確認 (a) 是本人聲音 (b) 同意上傳 Google。錄音：手機安靜處錄兩段（授權句 ≥3 秒、自然說話 15~20 秒），任何方式傳到電腦即可（例：存成 `private\gemini\{consent,source}.m4a`）；網頁版可直接上傳這兩段建音色，或退路 `voices.py replicate`。本人 replicated 的 ID 只存 repo 外（或 `private\` 內）的私人檔，不進任何角色卡、不進 git。
+- **Voice replication**（本人，或已取得聲音主人同意）：先過**同意閘**——Claude 貼出授權句原文（官方僅簡中文本，國語照唸）：「我是此声音的拥有者并授权谷歌使用此声音创建语音合成模型」；使用者在聊天室確認 (a) 是本人聲音，或已取得聲音主人同意（建議留書面）且授權句由聲音主人親自錄 (b) 同意上傳 Google。錄音：手機安靜處錄兩段（授權句 ≥3 秒、自然說話 15~20 秒），任何方式傳到電腦即可（例：存成 `private\gemini\{consent,source}.m4a`）；網頁版可直接上傳這兩段建音色，或退路 `voices.py replicate`。replicated 的 ID 只存 repo 外（或 `private\` 內）的私人檔，不進任何角色卡、不進 git。
 - **退路鏈**：API `design` 失敗才跑 `voices.py probe`（作者 2026-10-05 實測 create 可用、cmn-TW 可收，正常不必再跑）；probe **exit 2**（403／billing）（exit 2 先看 stderr：403／billing 才是『不開放』；若是全部語言碼被拒則改 `--langs` 再試）→ `api-facts.md` 記「voices.create 免費層不開放（日期）」，本節 API 造聲標不可用：角色改用預製音色（Sulafat／Achernar／Gacrux）＋底色加 `Taiwanese Mandarin accent`，本人聲音走本機克隆方案（如 F5-TTS），規則庫迴圈照跑；probe 只收 `en-US` → 仍可用，描述句帶 `Taiwanese Mandarin accent`，實際語言由 cue 文字決定（記 api-facts）。
 - **台灣腔上限**：voice 層連 3 輪腔沒移動 → 停，在本節寫明「prompted 音色唸不出台灣腔」上限，「台灣腔」需求改走本機克隆方案（如 F5-TTS，本人聲天生台灣腔）或其他支援 zh-TW 的 TTS（如 edge-tts zh-TW）。
 
@@ -135,7 +135,7 @@ tts_gemini 走 PowerShell 並注入金鑰（agent 的工具環境常讀不到使
 - **介面不碰 `rules.md`**：使用者說「整理一下／看日誌」→ 讀回合日誌裡介面留下的列與評語，照第 2 階段「當場蒸餾」回寫規則庫，並補該列的「判定」「規則」兩欄。
 - 介面存的 `cues.txt`／`styles.txt` 就是現況；Claude 接手下一輪前先讀這兩個檔與 `.ui_last.json`。
 - 後製列（模型＝後製）不花額度；後製能解的評語（音調一點點、句間停頓）引導使用者用滑桿，不必燒 flash。
-- 介面也能：貼金鑰（右上角；「記住」＝寫 HKCU 使用者環境變數）、上傳音檔進角色資料夾、波形與 A/B 對聽、造聲。造聲區＝`voices.py design`（描述落 `voice\desc-N.txt`）或 `replicate`（只限本人，頁面勾同意才送；試聽 `voice\clone-N.wav`），兩種合計每天 ≤3，日誌記一列「造聲N」（模型＝造聲，不佔輪次號）——接手時把這列當成造聲紀錄讀，定案仍照上方造聲段回寫；本人複製的 id 不抄進角色卡。
+- 介面也能：貼金鑰（右上角；「記住」＝寫 HKCU 使用者環境變數）、上傳音檔進角色資料夾、波形與 A/B 對聽、造聲。造聲區＝`voices.py design`（描述落 `voice\desc-N.txt`）或 `replicate`（本人或已取得同意，頁面勾同意才送，下方列相關法規；試聽 `voice\clone-N.wav`），兩種合計每天 ≤3，日誌記一列「造聲N」（模型＝造聲，不佔輪次號）——接手時把這列當成造聲紀錄讀，定案仍照上方造聲段回寫；複製來的 id 不抄進角色卡。
 - 角色資料夾在 repo 外時用 `--lab <上層資料夾>`。
 
 ## voices.py 速查
@@ -146,7 +146,7 @@ python scripts\voices.py list [--all] [--json]       # 自建音色登錄簿（�
 python scripts\voices.py get <voice_id>
 python scripts\voices.py delete <voice_id> --yes     # 先問使用者；grep 角色卡與私人 ID 檔為空才刪
 python scripts\voices.py design --name slug --gender female|male|neutral --lang cmn-TW --desc-file desc.txt --out sample.wav   # 退路
-python scripts\voices.py replicate --source s.m4a --consent c.m4a --name slug --lang cmn-TW --out private\gemini\sample.wav   # 退路，只本人
+python scripts\voices.py replicate --source s.m4a --consent c.m4a --name slug --lang cmn-TW --out private\gemini\sample.wav   # 退路，本人或已取得同意
 python scripts\voices.py probe [--langs cmn-TW,zh-TW,zh,cmn-CN,en-US] [--keep]   # 選用：走 API 造聲前跑一次
 ```
 `design`／`replicate` 最後印一行 fact JSON（`id/type/display_name/language_code/expire_time/key/sample`）；`delete` 印 `{"deleted": "<id>"}`；抄事實不 parse 散文。

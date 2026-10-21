@@ -56,14 +56,21 @@ python scripts\ui.py --lab D:\某處\角色們   # 角色資料夾放在 repo �
 - **波形**：原始／調整後兩條波形同一個時間尺，停頓拉長多少一眼看得出；點波形跳到該位置。
 - **A/B 對聽**：日誌區選兩個檔，「A⇄B 切換」停在同一個時間點換邊。
 - **輸入聲音**：頁面最上方，點一下選檔或把錄音檔拖進視窗（可一次多個），存進角色資料夾，後製、A/B、複製聲音都能選；旁邊「複製我的聲音 ↓」直接跳到複製區。
-- **造聲**：用描述造（`voices.py design`）或複製你本人的聲音（`voices.py replicate`，參考音 10~30 秒＋授權句 ≥3 秒，要勾「是我本人、同意上傳 Google」）；兩種合計每天最多 3 個，建好自動選進音色選單，日誌記一列「造聲N」。
+- **造聲**：用描述造（`voices.py design`）或複製聲音（`voices.py replicate`，本人或已取得聲音主人同意；參考音 10~30 秒＋授權句 ≥3 秒，授權句由聲音主人親自錄，送出前要勾同意；區塊下方列相關法規）；兩種合計每天最多 3 個，建好自動選進音色選單，日誌記一列「造聲N」。
 
 ## 兩種造聲
 
 預設走 **API**（`voices.py design`／`replicate`，免費層實測可建、`language_code: cmn-TW` 可收）。AI Studio 網頁版（<https://aistudio.google.com/generate-speech>）的 Voice Design **需付費層 key**，免費 key 進不去（2026-10-05 實測）；網頁版 Playground 只拿來當 flash 額度用完後的生成備援（有 Google AI Pro 者配額較高）。
 
 - **Voice design（角色聲）**：寫 1~2 句英文描述（含 `Taiwanese Mandarin accent`、`conversational`）→ `python scripts\voices.py design --name my-char --gender female --lang cmn-TW --desc-file lab\<角色>\voice\desc-1.txt --out lab\<角色>\voice\design-1.wav`（最後一行 JSON 就是 `voice_…` id，sample 先聽）→ `python scripts\voices.py list` 確認登錄簿。
-- **Voice replication（只限你自己的聲音）**：先過同意閘（念出授權句、確認是本人並同意上傳 Google）；手機安靜處錄兩段（授權句 ≥3 秒、自然說話 15~20 秒）→ `voices.py replicate --source … --consent …`（網頁版 Voice Replication 同樣在付費層）。本人 replicated 的 ID 只存 repo 外或 `private\` 內的私人檔，不進角色卡、不進 git。複製他人聲音一律不做。
+- **Voice replication（本人，或已取得聲音主人同意）**：先過同意閘（聲音主人親自念授權句；確認是本人，或已取得對方同意——建議留書面——並同意上傳 Google）；手機安靜處錄兩段（授權句 ≥3 秒、自然說話 15~20 秒）→ `voices.py replicate --source … --consent …`（網頁版 Voice Replication 同樣在付費層）。replicated 的 ID 只存 repo 外或 `private\` 內的私人檔，不進角色卡、不進 git。拿不出同意就不做，也不拿配音員／歌手已發表的錄音當參考音。
+
+  相關規範（台灣法規 2026-10 依全國法規資料庫查證；僅供參考，不是法律意見）：
+  - **Google**：Voice replication 要聲音主人親自唸授權句；[生成式 AI 使用政策](https://policies.google.com/terms/generative-ai/use-policy)禁止未揭露地冒充他人來欺騙。
+  - **民法 §18、§195**：聲音能辨識一個人，屬人格權保護範圍；未經同意使用，對方可請求除去侵害、賠償損害。
+  - **個人資料保護法 §2、§19**：可直接或間接識別個人的資料都算個資，聲音也是；蒐集、利用原則上要當事人同意。
+  - **刑法 §339-4 第 1 項第 4 款**：用電腦合成他人不實的影像、聲音來詐騙＝加重詐欺，處 1～7 年有期徒刑，得併科 100 萬元以下罰金。
+  - **著作權法 §7-1**：表演受著作權保護；別拿配音員、歌手已發表的錄音當參考音。
 
 ## 規則庫怎麼長
 
@@ -90,7 +97,7 @@ gemini-voice-lab/
 ├── learnings/            規則庫（rules.md）、API 事實（api-facts.md）、schema（README.md）
 ├── examples/範例角色/     可直接跑的起手範本：基準稿、cues、styles、空白回合日誌
 ├── lab/                  你的工作夾（.gitignore 已擋）
-└── private/              你的私人檔：本人聲音檔、ID（.gitignore 已擋）
+└── private/              你的私人檔：複製用的錄音、ID（.gitignore 已擋）
 ```
 
 ## 授權
@@ -105,8 +112,8 @@ gemini-voice-lab/
 
 - **Design for the free tier**: roughly 10 flash requests/day, lite counted separately (your own 429s are the source of truth); `--one-request` packs a whole script into one call. Whether to pay is your decision.
 - **Three handles**: voice (persona/accent, built once), style (one short sentence per segment), text (verbatim wording, replacements, inline tags). A listener's one-line comment is mapped to exactly one of them.
-- **Voices**: design a character voice or replicate your own (consent-gated, yourself only) in AI Studio's web UI, or via `scripts/voices.py` (list/get/delete/design/replicate/probe).
+- **Voices**: design a character voice or replicate a voice with its owner's consent (yourself, or someone who agreed and recorded the consent line themselves) in AI Studio's web UI, or via `scripts/voices.py` (list/get/delete/design/replicate/probe).
 - **Rules library**: every comment is written back to `learnings/rules.md` (trial -> confirmed after a second check on a different sentence; overturned entries are kept).
-- **Local UI (optional)**: `python scripts/ui.py` opens a localhost-only page to regenerate (one request per click) and to post-tune pitch, tempo, pauses and volume for free (with waveforms and A/B switching); it can also take your API key, upload your own recordings, and create voices (design from a description, or replicate your own voice behind a consent checkbox, 3 per day); every round is logged to the character's round log.
+- **Local UI (optional)**: `python scripts/ui.py` opens a localhost-only page to regenerate (one request per click) and to post-tune pitch, tempo, pauses and volume for free (with waveforms and A/B switching); it can also take your API key, upload your own recordings, and create voices (design from a description, or replicate a voice with its owner's consent behind a checkbox, with the relevant Taiwan laws listed below it; 3 per day); every round is logged to the character's round log.
 - **Requirements**: Python 3.10+, `pip install google-genai`, ffmpeg, `GEMINI_API_KEY` (the local UI also needs `numpy`, an ffmpeg build with rubberband, and `tzdata` on Windows). Run `python scripts/voices.py --selfcheck` (offline) and a `--dry-run` first.
 - **License**: MIT.

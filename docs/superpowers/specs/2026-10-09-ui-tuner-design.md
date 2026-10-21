@@ -123,5 +123,5 @@ preview 與 save 走同一個函式，試聽即成品。
 - 波形：原始／調整後共用時間尺（Web Audio 解碼，不載外部庫）；點波形跳轉。音檔路由補 HTTP Range（206），否則 Chrome 不能跳轉。
 - A/B 對聽：同一個播放器換來源，切換保留時間點。
 - 上傳音檔：`POST /api/upload`（base64，≤30 MB，不覆寫，`rNN` 開頭加 `up-`）→ 角色資料夾。
-- 造聲：`POST /api/design`／`/api/replicate` 子程序呼叫 `voices.py`；replicate 要 `own_voice: true`；兩種合計每天 ≤3（日誌「模型＝造聲」列計數）；試聽 `voice\design-N.wav`／`voice\clone-N.wav`。
+- 造聲：`POST /api/design`／`/api/replicate` 子程序呼叫 `voices.py`；replicate 要 `consented: true`（本人，或已取得聲音主人同意且授權句由對方親錄；頁面在複製區下方列相關法規）；兩種合計每天 ≤3（日誌「模型＝造聲」列計數）；試聽 `voice\design-N.wav`／`voice\clone-N.wav`。
 - 金鑰：`POST /api/key` 設進本程序 env，`remember` 寫 HKCU\Environment；只回驗證結果（`voices.py list`），任何回應都不含金鑰。

@@ -604,16 +604,16 @@ def do_design(p: dict) -> dict:
 
 
 def do_replicate(p: dict) -> dict:
-    """用使用者本人的錄音複製音色：參考音 10~30 秒＋授權句 ≥3 秒（秒數閘在 voices.py，上傳 Google 前就擋）。"""
-    if p.get("own_voice") is not True:
-        raise ValueError("複製只限你本人的聲音：勾選「這是我本人的聲音，同意上傳 Google 建立音色」才送得出")
+    """複製本人或已取得同意者的聲音：參考音 10~30 秒＋授權句 ≥3 秒（授權句要聲音主人親錄；秒數閘在 voices.py，上傳 Google 前就擋）。"""
+    if p.get("consented") is not True:
+        raise ValueError("複製聲音要是本人，或已取得聲音主人同意（授權句由他本人親自錄）：勾選同意那一格才送得出")
     d = role_dir(p.get("role", ""))
     sname, spath = _src(d, {"src": p.get("source")})
     cname, cpath = _src(d, {"src": p.get("consent")})
     if sname == cname:
         raise ValueError("參考音和授權句不能是同一個檔")
     return _voice_job(p, "clone", lambda vd, n: (["replicate", "--source", spath, "--consent", cpath],
-                                                 f"本人複製，參考音 {sname}、授權句 {cname}", lambda: None))
+                                                 f"複製（本人或已取得同意），參考音 {sname}、授權句 {cname}", lambda: None))
 
 
 def do_upload(p: dict) -> dict:
@@ -1159,16 +1159,16 @@ def _check_http(tmp):
         for bad in (up("我的聲音.wav"), up("x.exe"), up(".."), up("y.wav", "不是base64!"), up("z.wav", "")):
             assert bad[0] == 400, bad
         assert {"我的聲音.wav", "授權句.m4a", "up-r50.wav"} <= set(state()["audio"])
-        # 複製：沒勾本人同意、同一個檔、不存在的檔 → 400；成功 → 試聽 voice\clone-N.wav、日誌列、跟造聲共用每日上限
+        # 複製：沒勾同意、同一個檔、不存在的檔 → 400；成功 → 試聽 voice\clone-N.wav、日誌列、跟造聲共用每日上限
         _run = design_run
-        rform = {"role": role, "name": "me", "lang": "cmn-TW", "source": "我的聲音.wav", "consent": "授權句.m4a", "own_voice": True}
-        for bad in ({"own_voice": False}, {"own_voice": "true"}, {"consent": "我的聲音.wav"}, {"source": "沒這個.wav"}):
+        rform = {"role": role, "name": "me", "lang": "cmn-TW", "source": "我的聲音.wav", "consent": "授權句.m4a", "consented": True}
+        for bad in ({"consented": False}, {"consented": "true"}, {"consent": "我的聲音.wav"}, {"source": "沒這個.wav"}):
             assert req("POST", "/api/replicate", dict(rform, **bad))[0] == 400, bad
         st, j = req("POST", "/api/replicate", rform)
         assert st == 200 and (j["n"], j["sample"], j["designs"]) == (3, "voice/clone-3.wav", 2), j
         assert calls[-1][2:5] == ["replicate", "--source", os.path.join(d, "我的聲音.wav")]
         s = state()
-        assert "本人複製" in s["rounds"][-1]["只改了什麼"] and "clone-3.wav" in s["samples"] and s["next_design"] == 4
+        assert "已取得同意" in s["rounds"][-1]["只改了什麼"] and "clone-3.wav" in s["samples"] and s["next_design"] == 4
         assert s["consent_text"].startswith("我是此声音的拥有者")
         for _ in range(DESIGN_DAILY - 2):
             assert req("POST", "/api/design", vform)[0] == 200

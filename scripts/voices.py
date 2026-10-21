@@ -13,7 +13,7 @@ design/replicate 是網頁版不可用時的退路；probe 只在要走 API 造�
   python voices.py replicate --source me.m4a --consent consent.m4a --name my-voice --lang cmn-TW --out private\\gemini\\sample.wav
   python voices.py probe [--langs cmn-TW,zh-TW,zh,cmn-CN,en-US] [--keep] [--out DIR]
 
-鐵則：免費層設計（429 per day 直接停，不重試）；ID／音檔不進 git（private\\ 與 lab\\ 已被 .gitignore 擋）；複製只做使用者本人；CJK 走檔案不走 argv。
+鐵則：免費層設計（429 per day 直接停，不重試）；ID／音檔不進 git（private\\ 與 lab\\ 已被 .gitignore 擋）；複製限本人或已取得聲音主人同意（授權句由對方親錄）；CJK 走檔案不走 argv。
 """
 import argparse
 import base64
