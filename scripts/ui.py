@@ -42,7 +42,8 @@ except ImportError as e:
     sys.exit(f"找不到同目錄的 tts_gemini.py／voices.py（{e}）")
 
 LAB = os.path.join(ROOT, "lab")  # selfcheck 會暫時換成暫存夾
-TEMPLATE_LOG = os.path.join(ROOT, "examples", "範例角色", "回合日誌.md")
+TEMPLATE_DIR = os.path.join(ROOT, "examples", "範例角色")
+TEMPLATE_LOG = os.path.join(TEMPLATE_DIR, "回合日誌.md")
 LOG_NAME, LAST_NAME, PREVIEW_NAME = "回合日誌.md", ".ui_last.json", ".preview.mp3"
 VOICE_SUB, DESIGN_MODEL, DESIGN_DAILY = "voice", "造聲", 3  # 造聲描述／試聽放 <角色>\voice\；SKILL.md：確認共不共用 flash 前每天 ≤3
 def _zones(zi=ZoneInfo):
@@ -638,6 +639,22 @@ def do_upload(p: dict) -> dict:
     return {"file": name}
 
 
+def do_new_role(p: dict) -> dict:
+    """新增角色：照 examples\\範例角色 建一份（文字檔裡的「範例角色」／<角色> 換成新名字）。不覆寫既有資料夾。"""
+    name = safe_name(str(p.get("name") or "").strip())
+    if name.startswith(".") or len(name) > 40:
+        raise ValueError("角色名不能以 . 開頭、最多 40 字")
+    d = os.path.join(LAB, name)
+    if os.path.exists(d):
+        raise ValueError(f"已經有這個角色：{name}")
+    os.makedirs(d)
+    for f in os.listdir(TEMPLATE_DIR):
+        src = os.path.join(TEMPLATE_DIR, f)
+        if os.path.isfile(src):
+            _write_text(os.path.join(d, f), "\n".join(_read_lines(src)).replace("範例角色", name).replace("<角色>", name) + "\n")
+    return {"role": name}
+
+
 def do_comment(p: dict) -> dict:
     d = role_dir(p.get("role", ""))
     set_comment(ensure_log(d), str(p.get("round") or ""), str(p.get("comment") or ""))
@@ -649,7 +666,7 @@ TOKEN = secrets.token_urlsafe(16)
 ALLOWED_HOSTS = set()  # 綁好埠後填入；擋 DNS rebinding
 ROUTES = {"/api/dryrun": do_dryrun, "/api/generate": do_generate, "/api/preview": do_preview,
           "/api/save": do_save, "/api/comment": do_comment, "/api/design": do_design,
-          "/api/replicate": do_replicate, "/api/upload": do_upload, "/api/key": do_key}
+          "/api/replicate": do_replicate, "/api/upload": do_upload, "/api/key": do_key, "/api/role": do_new_role}
 MIME = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".flac": "audio/flac", ".ogg": "audio/ogg",
         ".aac": "audio/aac"}
 MAX_BODY = UPLOAD_MAX * 4 // 3 + 65536  # base64 膨脹 4/3 ＋ JSON 其餘欄位
@@ -1046,6 +1063,16 @@ def _check_http(tmp):
         assert req("GET", "/api/roles", host="evil.example:80")[0] == 403
         assert req("POST", "/api/comment", {"role": role}, token="x")[0] == 403
         assert role in req("GET", "/api/roles")[1]["roles"]
+        # 新增角色：照範本建、名字換進文字檔、不覆寫、名稱防護
+        assert req("POST", "/api/role", {"name": " 新角色 "}) == (200, {"role": "新角色"})
+        nr = os.path.join(tmp, "新角色")
+        assert set(os.listdir(nr)) == set(os.listdir(TEMPLATE_DIR)) and "新角色" in req("GET", "/api/roles")[1]["roles"]
+        assert _read_lines(os.path.join(nr, LOG_NAME))[0] == "# 配音實驗室：新角色" and read_rounds(os.path.join(nr, LOG_NAME)) == []
+        with open(os.path.join(nr, "cues.txt"), encoding="utf-8") as f:
+            assert "新角色 r01" in f.read()
+        for bad in ("新角色", "", "../x", "a\\b", ".hidden", "長" * 41):
+            assert req("POST", "/api/role", {"name": bad})[0] == 400, bad
+        shutil.rmtree(nr)  # 後面的自檢會數全部角色的額度
         # 試切段：真跑 tts_gemini --dry-run（0 額度）；cues／styles 寫回檔
         form = {"role": role, "voice": "Sulafat", "model": "flash", "base": "calm",
                 "cues": "【平穩】\n你好啊。\n【停 1.0】\n【收尾】\n晚安。\n", "styles": "平穩: soft"}

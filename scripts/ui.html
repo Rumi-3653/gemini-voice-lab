@@ -54,6 +54,7 @@ legend{padding:0 4px}
 <main>
   <div class="bar">
     <label>角色 <select id="role"></select></label>
+    <button id="newrole" title="照範例角色的空白範本建一個新角色資料夾">＋ 新增角色</button>
     <span style="flex:1"></span>
     <span class="pill" id="quota">今日 flash –</span>
     <span class="muted" id="reset"></span>
@@ -461,6 +462,16 @@ $("gen").onclick = async () => {
   finally { $("gen").disabled = false; }
 };
 
+$("newrole").onclick = async () => {
+  const name = (prompt("新角色的名字（會變成資料夾名，中文可以）") || "").trim();
+  if (!name) return;
+  err("");
+  try {
+    await api("/api/role", {name});
+    try { localStorage.setItem("gvl-role", name); } catch {}
+    location.reload();  // 重新整理就會選到新角色（角色清單、音色、狀態一次重載）
+  } catch (e) { err(e); }
+};
 setInterval(() => fetch("/api/ping").catch(() => {}), 30000);  // 桌面捷徑模式：視窗開著就回報，關掉 3 分鐘後伺服器自己結束
 (async () => {
   try {
@@ -468,7 +479,7 @@ setInterval(() => fetch("/api/ping").catch(() => {}), 30000);  // 桌面捷徑�
     const r = await api("/api/roles");
     showKey(r.has_key);
     if (!r.has_key) $("keybox").open = true;  // 只在開啟時展開一次；只做後製的人可以收起來
-    if (!r.roles.length) return err(`${r.lab} 底下還沒有角色資料夾。先照 SKILL.md 第 1 階段建一個（例如把 examples\\範例角色 整夾複製過去）。`);
+    if (!r.roles.length) return err(`${r.lab} 底下還沒有角色：按上方「＋ 新增角色」建一個。`);
     for (const x of r.roles) $("role").add(new Option(x, x));
     try { const saved = localStorage.getItem("gvl-role"); if (saved && r.roles.includes(saved)) $("role").value = saved; } catch {}
     $("role").onchange = () => { try { localStorage.setItem("gvl-role", role()); } catch {} err(""); loadState(true).catch(err); };
