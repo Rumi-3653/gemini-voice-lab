@@ -40,6 +40,10 @@ legend{padding:0 4px}
 .ab{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
 .ab select{width:auto;max-width:10em}
 .small{font-size:12px}
+dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;width:min(440px,calc(100vw - 32px));box-sizing:border-box}
+dialog::backdrop{background:rgba(0,0,0,.35)}
+#askmsg{white-space:pre-wrap;margin:0 0 8px}
+.askbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 .law{margin-top:8px;border-top:1px solid var(--line);padding-top:6px}
 .law ul{margin:4px 0 0;padding-left:18px}
 .drop{border:2px dashed var(--line);text-align:center;cursor:pointer;margin-bottom:12px}
@@ -51,6 +55,11 @@ legend{padding:0 4px}
 </style>
 </head>
 <body>
+<dialog id="ask"><form method="dialog">
+  <p id="askmsg"></p>
+  <input type="text" id="askin" hidden aria-label="輸入">
+  <div class="askbtns"><button value="no">取消</button><button value="ok" class="go" id="askok">確定</button></div>
+</form></dialog>
 <main>
   <div class="bar">
     <label>角色 <select id="role"></select></label>
@@ -177,6 +186,20 @@ async function api(path, body) {
   return j;
 }
 function err(e) { $("err").textContent = e ? String(e.message || e) : ""; }
+// 頁面自己的確認／輸入框：不靠 confirm()／prompt()（Edge 獨立視窗等環境可能不跳）
+function ask(msg, input) {
+  const d = $("ask");
+  $("askmsg").textContent = msg;
+  $("askin").hidden = !input;
+  $("askin").value = "";
+  d.returnValue = "";
+  d.showModal();
+  if (input) $("askin").focus();
+  return new Promise(done => d.addEventListener("close", () => {
+    const ok = d.returnValue === "ok";
+    done(input ? (ok ? $("askin").value.trim() : "") : ok);
+  }, {once: true}));
+}
 const role = () => $("role").value;
 const audioUrl = f => `/audio/${encodeURIComponent(role())}/${encodeURIComponent(f)}?t=${Date.now()}`;
 const form = () => ({role: role(), voice: $("voice").value, model: $("model").value, base: $("base").value, cues: $("cues").value, styles: $("styles").value});
@@ -406,7 +429,7 @@ document.addEventListener("drop", e => { e.preventDefault(); $("drop").classList
 
 // ---- 造聲（描述）與複製（本人或已取得同意者的錄音）：都會在雲端專案建一個音色 ----
 async function createVoice(path, body, btn, what) {
-  if (!confirm(`${what}：會在雲端專案建立一個音色（今天第 ${S.designs + 1}/${S.design_daily} 個）。\n免費層可建；會不會也算進 flash 次數還沒驗證。\n\n代號：${body.name}`)) return;
+  if (!(await ask(`${what}：會在雲端專案建立一個音色（今天第 ${S.designs + 1}/${S.design_daily} 個）。\n免費層可建；會不會也算進 flash 次數還沒驗證。\n\n代號：${body.name}`))) return;
   err(""); btn.disabled = true; $("dout").textContent = `${what}中…（約 10～60 秒）`; $("daudio").hidden = true;
   try {
     const j = await api(path, body);
@@ -450,7 +473,7 @@ $("gen").onclick = async () => {
   const f = form(), flash = f.model === "flash", n = S.used + 1;
   let msg = flash ? `會用掉 1 次 flash，今天第 ${n}/${S.daily} 次。` : "用 lite 生成（不算 flash 次數）。";
   if (flash && S.daily - S.used <= S.reserve) msg = `注意：這次會用到保留給成品的 ${S.reserve} 次（今天第 ${n}/${S.daily} 次）。確定要用在訓練嗎？`;
-  if (!confirm(msg + "\n\n" + $("diff").textContent)) return;
+  if (!(await ask(msg + "\n\n" + $("diff").textContent))) return;
   err(""); $("gen").disabled = true; $("genout").textContent = "生成中…（約 10～60 秒）";
   try {
     const j = await api("/api/generate", f);
@@ -462,8 +485,9 @@ $("gen").onclick = async () => {
   finally { $("gen").disabled = false; }
 };
 
+$("askin").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("ask").close("ok"); } };  // Enter＝確定（表單預設會按到第一顆「取消」）
 $("newrole").onclick = async () => {
-  const name = (prompt("新角色的名字（會變成資料夾名，中文可以）") || "").trim();
+  const name = await ask("新角色的名字（會變成資料夾名，中文可以）", true);
   if (!name) return;
   err("");
   try {
