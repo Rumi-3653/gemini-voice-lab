@@ -114,3 +114,14 @@ preview 與 save 走同一個函式，試聽即成品。
 - 造聲／刪音色（`voices.py` 指令列已足夠）。
 - 波形圖、多檔混音、SRT 編輯。
 - 瀏覽器端即時 DSP 預覽（伺服器端 ffmpeg 一次產出，試聽即成品）。
+
+## 增補（2026-10-21，使用者要求）
+
+原「不做」清單裡的造聲與波形改為要做，另加四項；既有腳本仍不改：
+
+- `--lab <資料夾>`：角色資料夾放 repo 外（配 `--install-shortcut` 寫進捷徑）。
+- 波形：原始／調整後共用時間尺（Web Audio 解碼，不載外部庫）；點波形跳轉。音檔路由補 HTTP Range（206），否則 Chrome 不能跳轉。
+- A/B 對聽：同一個播放器換來源，切換保留時間點。
+- 上傳音檔：`POST /api/upload`（base64，≤30 MB，不覆寫，`rNN` 開頭加 `up-`）→ 角色資料夾。
+- 造聲：`POST /api/design`／`/api/replicate` 子程序呼叫 `voices.py`；replicate 要 `own_voice: true`；兩種合計每天 ≤3（日誌「模型＝造聲」列計數）；試聽 `voice\design-N.wav`／`voice\clone-N.wav`。
+- 金鑰：`POST /api/key` 設進本程序 env，`remember` 寫 HKCU\Environment；只回驗證結果（`voices.py list`），任何回應都不含金鑰。

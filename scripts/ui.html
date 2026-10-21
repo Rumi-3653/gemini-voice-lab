@@ -16,7 +16,7 @@ h2{font-size:15px;margin:0 0 8px;font-weight:600}
 .row{display:grid;grid-template-columns:72px minmax(0,1fr);gap:6px 8px;align-items:center;margin-bottom:6px}
 .sl{display:grid;grid-template-columns:72px minmax(0,1fr) 84px;gap:6px 8px;align-items:center}
 input,select,textarea,button{font:inherit;color:inherit}
-input[type=text],select,textarea{width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+input[type=text],input[type=password],select,textarea{width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
 textarea{font-family:Consolas,"Microsoft JhengHei",monospace;resize:vertical}
 button{background:transparent;border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
 button.go{border-color:var(--warn);color:var(--warn)}
@@ -32,6 +32,18 @@ th{color:var(--muted)}
 pre{white-space:pre-wrap;margin:6px 0 0;font-size:12px}
 audio{width:100%;margin:4px 0}
 .logwrap{overflow-x:auto}
+canvas.wave{width:100%;height:56px;display:block;cursor:pointer;border-radius:6px;background:var(--bg)}
+summary{cursor:pointer}
+summary h2{display:inline}
+fieldset{border:1px solid var(--line);border-radius:8px;margin:8px 0 0;padding:8px 10px;min-width:0}
+legend{padding:0 4px}
+.ab{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.ab select{width:auto;max-width:10em}
+.small{font-size:12px}
+.bar{position:relative}
+#keybox summary{list-style:none}
+#keybox summary.nokey{background:var(--danger);color:var(--card)}
+.keypanel{position:absolute;right:0;top:calc(100% + 6px);z-index:10;width:min(360px,100%);box-sizing:border-box;box-shadow:0 6px 24px rgba(0,0,0,.18)}
 </style>
 </head>
 <body>
@@ -41,6 +53,16 @@ audio{width:100%;margin:4px 0}
     <span style="flex:1"></span>
     <span class="pill" id="quota">今日 flash –</span>
     <span class="muted" id="reset"></span>
+    <details id="keybox">
+      <summary class="pill" id="keystate">金鑰 –</summary>
+      <div class="card keypanel">
+        <label class="muted" for="apikey">Gemini API 金鑰（<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">到 AI Studio 建一把</a>）</label>
+        <input type="password" id="apikey" autocomplete="off" spellcheck="false" placeholder="AIza…">
+        <label style="display:block;margin:6px 0"><input type="checkbox" id="keyremember" checked> 記住（存進 Windows 使用者環境變數，等同 setx；下次開不用再貼）</label>
+        <div style="display:flex;gap:8px;align-items:center"><button id="keysave">儲存並驗證</button><span class="muted small" id="keyout"></span></div>
+        <div class="muted small" style="margin-top:6px">金鑰只交給本機的 tts_gemini.py／voices.py，不會顯示回頁面、不寫進日誌。驗證用 voices.py list，不花生成額度。</div>
+      </div>
+    </details>
   </div>
   <div class="err" id="err" role="alert"></div>
   <div class="grid">
@@ -63,20 +85,58 @@ audio{width:100%;margin:4px 0}
     </section>
     <section class="card">
       <h2>後製 <span class="muted">· 免費</span></h2>
-      <div class="row"><label class="muted" for="src">來源</label><select id="src"></select></div>
+      <div class="row"><label class="muted" for="src">來源</label><div style="display:flex;gap:6px"><select id="src"></select><button id="upbtn" title="把你自己的音檔放進這個角色資料夾">上傳音檔…</button></div></div>
+      <input type="file" id="upfile" accept="audio/*,.m4a,.aac" hidden>
       <div class="sl">
         <label class="muted" for="pitch">音高</label><input type="range" id="pitch" min="-3" max="3" step="0.5" value="0"><span id="pitchv"></span>
         <label class="muted" for="tempo">語速</label><input type="range" id="tempo" min="0.8" max="1.2" step="0.05" value="1"><span id="tempov"></span>
         <label class="muted" for="pause">句間停頓</label><input type="range" id="pause" min="0" max="1" step="0.05" value="0"><span id="pausev"></span>
         <label class="muted" for="gain">音量</label><input type="range" id="gain" min="-6" max="6" step="1" value="0"><span id="gainv"></span>
       </div>
-      <div class="muted" style="margin-top:8px">原始</div><audio id="orig" controls></audio>
-      <div class="muted">調整後 <span id="pvstate"></span></div><audio id="prev" controls></audio>
+      <div class="muted" style="margin-top:8px">原始</div><canvas class="wave" id="origwave" aria-label="原始音檔波形（點一下跳到該位置）"></canvas><audio id="orig" controls></audio>
+      <div class="muted">調整後 <span id="pvstate"></span></div><canvas class="wave" id="prevwave" aria-label="調整後音檔波形（點一下跳到該位置）"></canvas><audio id="prev" controls></audio>
+      <div class="muted small" id="waveinfo">兩條波形同一個時間尺，看得出停頓拉長多少</div>
       <div style="display:flex;gap:8px;margin-top:8px"><button id="reset0">歸零</button><span style="flex:1"></span><button id="save">存檔</button></div>
     </section>
   </div>
+  <details class="card" style="margin-top:12px">
+    <summary><h2>造聲 <span class="muted">· 建一個專屬音色存進雲端專案 · 今日 <span id="dcount">–</span></span></h2></summary>
+    <div class="row" style="margin-top:8px">
+      <label class="muted" for="dname">代號</label><input type="text" id="dname" placeholder="英數與 - _，例如 narrator-warm-2（中文名寫角色卡）">
+      <label class="muted" for="dlang">語言碼</label><input type="text" id="dlang" value="cmn-TW">
+    </div>
+    <div class="grid">
+      <fieldset>
+        <legend>用描述造聲</legend>
+        <div class="row"><label class="muted" for="dgender">性別</label><select id="dgender"><option value="female">female 女</option><option value="male">male 男</option><option value="neutral">neutral 中性</option></select></div>
+        <label class="muted" for="ddesc">描述（1~2 句英文，含 Taiwanese Mandarin accent 與 conversational）</label>
+        <textarea id="ddesc" rows="3" placeholder="A man in his 30s with a Taiwanese Mandarin accent, friendly conversational tone, relaxed pace."></textarea>
+        <button class="go" id="design" style="margin-top:6px">用描述造聲</button>
+      </fieldset>
+      <fieldset>
+        <legend>複製我的聲音（只限本人）</legend>
+        <div class="row">
+          <label class="muted" for="rsrc">參考音</label><select id="rsrc"></select>
+          <label class="muted" for="rcon">授權句</label><select id="rcon"></select>
+        </div>
+        <div class="muted small">參考音＝自然說話 10~30 秒；授權句＝唸完這句（≥3 秒）：「<span id="ctext"></span>」。手機錄好後用「上傳音檔…」放進來。</div>
+        <label style="display:block;margin:6px 0"><input type="checkbox" id="rown"> 這是我本人的聲音，我同意上傳 Google 建立音色</label>
+        <div style="display:flex;gap:8px"><button id="upbtn2">上傳音檔…</button><button class="go" id="replicate">複製聲音</button></div>
+      </fieldset>
+    </div>
+    <pre id="dout" class="muted"></pre>
+    <audio id="daudio" controls hidden></audio>
+    <div class="muted small">建好會自動選進「音色」，按「生成」才聽得到中文效果（試聽是 Google 的英文示範句）。落選的用 <code>python scripts\voices.py delete &lt;id&gt; --yes</code> 刪；本人複製的 id 別抄進角色卡。</div>
+  </details>
   <section class="card" style="margin-top:12px">
     <h2>回合日誌 <span class="muted">· 評語打完按 Enter 或點別處就存</span></h2>
+    <div class="ab">
+      <span class="muted">A/B 對聽</span>
+      <label>A <select id="abA"></select></label><label>B <select id="abB"></select></label>
+      <button id="abPlayA">▶ A</button><button id="abPlayB">▶ B</button><button id="abSwap" title="停在同一個時間點切到另一邊">A⇄B 切換</button>
+      <span class="muted" id="abNow"></span>
+    </div>
+    <audio id="ab" controls></audio>
     <div class="logwrap"><table>
       <thead><tr><th>輪</th><th>日期</th><th>模型</th><th>只改了什麼</th><th>試聽</th><th style="width:32%">你的評語</th></tr></thead>
       <tbody id="log"></tbody>
@@ -113,7 +173,26 @@ function showDiff() {
 function showQuota() {
   $("quota").textContent = S.exhausted ? "今天 flash 用完了" : `今日 flash ${S.used} / ${S.daily} · 保留 ${S.reserve}`;
   $("reset").textContent = `${S.reset} 重置`;
+  showKey(S.has_key);
 }
+function showKey(ok) {
+  $("keystate").textContent = ok ? "金鑰 已設定" : "未設定金鑰";
+  $("keystate").className = ok ? "pill" : "pill nokey";
+}
+$("keysave").onclick = async () => {
+  const key = $("apikey").value.trim();
+  if (!key) return $("apikey").focus();
+  err(""); $("keysave").disabled = true; $("keyout").textContent = "驗證中…";
+  try {
+    const j = await api("/api/key", {key, remember: $("keyremember").checked});
+    $("apikey").value = "";
+    $("keyout").textContent = (j.check === "ok" ? `可以用（讀到 ${j.custom} 個自建音色）` : `已設定，但驗證失敗：${j.check}`)
+      + (j.saved ? "；已記住" : "；只用到這次關掉介面為止");
+    await loadVoices().catch(e => err("音色清單讀不到：" + e.message));
+    if (S) await loadState();
+  } catch (e) { $("keyout").textContent = ""; err(e); }
+  finally { $("keysave").disabled = false; }
+};
 async function loadVoices() {
   const v = await api("/api/voices");
   $("voice").innerHTML = "";
@@ -128,7 +207,9 @@ function renderLog() {
     const tr = tb.insertRow();
     for (const k of ["輪", "日期", "模型", "只改了什麼"]) tr.insertCell().textContent = r[k] || "";
     const td = tr.insertCell();
-    const f = S.audio.find(a => a.startsWith(r["輪"] + "."));
+    const n = r["模型"] === "造聲" ? r["輪"].replace(/\D/g, "") : "";
+    const sample = n && S.samples.find(a => a === `design-${n}.wav` || a === `clone-${n}.wav`);
+    const f = n ? (sample && `voice/${sample}`) : S.audio.find(a => a.startsWith(r["輪"] + "."));
     if (f) {
       const b = document.createElement("button");
       b.textContent = "▶";
@@ -157,9 +238,66 @@ function showFx() {
   $("pausev").textContent = `+${f.pause_add.toFixed(2)} 秒`;
   $("gainv").textContent = `${f.gain_db > 0 ? "+" : ""}${f.gain_db} dB`;
 }
+// ---- 波形：原始／調整後共用同一個時間尺，停頓拉長多少一眼看得出 ----
+const WAVES = {orig: null, prev: null};
+let actx = null;
+function setAudio(id, f) {
+  const url = f ? audioUrl(f) : "";
+  if (url) $(id).src = url; else $(id).removeAttribute("src");
+  WAVES[id] = null; drawWaves();
+  if (!url) return;
+  (async () => {
+    try {
+      actx = actx || new AudioContext();
+      const buf = await actx.decodeAudioData(await (await fetch(url)).arrayBuffer());
+      if ($(id).getAttribute("src") === url) { WAVES[id] = {data: buf.getChannelData(0), dur: buf.duration}; drawWaves(); }
+    } catch { /* 解不了就不畫，播放照常 */ }
+  })();
+}
+function peaks(w, cols) {
+  if (w.cols !== cols) {
+    const pk = new Float32Array(cols * 2), step = w.data.length / cols;
+    for (let x = 0; x < cols; x++) {
+      let lo = 0, hi = 0;
+      for (let i = Math.floor(x * step), e = Math.floor((x + 1) * step); i < e; i++) { const v = w.data[i]; if (v < lo) lo = v; else if (v > hi) hi = v; }
+      pk[2 * x] = lo; pk[2 * x + 1] = hi;
+    }
+    w.cols = cols; w.pk = pk;
+  }
+  return w.pk;
+}
+const span = () => Math.max(WAVES.orig ? WAVES.orig.dur : 0, WAVES.prev ? WAVES.prev.dur : 0) || 1;
+function drawWaves() {
+  const cs = getComputedStyle(document.documentElement), sp = span(), dpr = window.devicePixelRatio || 1;
+  for (const id of ["orig", "prev"]) {
+    const cv = $(id + "wave"), w = WAVES[id], W = cv.width = Math.round(cv.clientWidth * dpr), H = cv.height = Math.round(cv.clientHeight * dpr);
+    const g = cv.getContext("2d");
+    g.clearRect(0, 0, W, H);
+    if (!w) continue;
+    const cols = Math.max(1, Math.round(W * w.dur / sp)), pk = peaks(w, cols);
+    g.fillStyle = cs.getPropertyValue("--accent");
+    for (let x = 0; x < cols; x++) g.fillRect(x, (1 - pk[2 * x + 1]) * H / 2, 1, Math.max(1, (pk[2 * x + 1] - pk[2 * x]) * H / 2));
+    g.fillStyle = cs.getPropertyValue("--warn");
+    g.fillRect(Math.round($(id).currentTime / sp * W), 0, Math.ceil(dpr), H);
+  }
+  const o = WAVES.orig, p = WAVES.prev;
+  $("waveinfo").textContent = !o ? "兩條波形同一個時間尺，看得出停頓拉長多少"
+    : `原始 ${o.dur.toFixed(1)} 秒` + (p ? `　調整後 ${p.dur.toFixed(1)} 秒（${p.dur >= o.dur ? "+" : ""}${(p.dur - o.dur).toFixed(1)}）` : "");
+}
+function tick() { drawWaves(); if (!$("orig").paused || !$("prev").paused) requestAnimationFrame(tick); }
+for (const id of ["orig", "prev"]) {
+  $(id).addEventListener("play", tick);
+  $(id).addEventListener("seeked", drawWaves);
+  $(id + "wave").onclick = e => {
+    const w = WAVES[id], r = e.currentTarget.getBoundingClientRect(), t = (e.clientX - r.left) / r.width * span();
+    if (w && t <= w.dur) { $(id).currentTime = t; drawWaves(); }
+  };
+}
+window.addEventListener("resize", drawWaves);
+
 function loadSrc() {
-  if ($("src").value) $("orig").src = audioUrl($("src").value); else $("orig").removeAttribute("src");
-  $("prev").removeAttribute("src");
+  setAudio("orig", $("src").value);
+  setAudio("prev", "");
   $("pvstate").textContent = "";
 }
 let pvSeq = 0;
@@ -172,26 +310,83 @@ async function preview() {
   try {
     const j = await api("/api/preview", {role: role(), src: $("src").value, ...fx()});
     if (seq !== pvSeq) return;
-    $("prev").src = audioUrl(j.file);
+    setAudio("prev", j.file);
     $("pvstate").textContent = "";
     $("prev").play().catch(() => {});
   } catch (e) { if (seq === pvSeq) { $("pvstate").textContent = ""; err(e); } }
 }
-async function loadState() {
+function fillFiles(sel, fromEnd) {  // 音檔下拉：保留原選擇，否則選倒數第 fromEnd 個
+  const keep = sel.value;
+  sel.innerHTML = "";
+  for (const f of S.audio) sel.add(new Option(f, f));
+  sel.value = S.audio.includes(keep) ? keep : (S.audio[S.audio.length - fromEnd] || S.audio[0] || "");
+}
+async function loadState(fresh) {  // fresh＝剛換角色：造聲描述也換成該角色上一版
   S = await api(`/api/state?role=${encodeURIComponent(role())}`);
   setSel($("voice"), S.voice);
   $("model").value = S.model;
   $("base").value = S.base;
   $("cues").value = S.cues;
   $("styles").value = S.styles;
-  const keep = $("src").value;
-  $("src").innerHTML = "";
-  for (const f of S.audio) $("src").add(new Option(f, f));
-  if (S.audio.includes(keep)) $("src").value = keep; else if (S.audio.length) $("src").value = S.audio[S.audio.length - 1];
+  for (const [id, k] of [["src", 1], ["abA", 2], ["abB", 1], ["rsrc", 1], ["rcon", 1]]) fillFiles($(id), k);
+  if (fresh) $("ddesc").value = S.desc;
+  $("ctext").textContent = S.consent_text;
+  $("dcount").textContent = `${S.designs} / ${S.design_daily}`;
   $("gen").textContent = `生成 ${S.next}`;
   renderLog(); showQuota(); showDiff(); loadSrc();
   if (S.log_error) err(S.log_error);
 }
+
+// ---- A/B 對聽：同一個播放器換來源，切換時停在同一個時間點 ----
+let abSide = "A";
+function abPlay(side, keepTime) {
+  const f = $("ab" + side).value, a = $("ab");
+  if (!f) return;
+  const t = keepTime ? a.currentTime : 0, play = keepTime ? !a.paused : true;
+  abSide = side;
+  a.src = audioUrl(f);
+  a.onloadedmetadata = () => { a.currentTime = Math.min(t, a.duration || t); if (play) a.play().catch(err); };
+  $("abNow").textContent = `正在聽 ${side}：${f}`;
+}
+$("abPlayA").onclick = () => abPlay("A", false);
+$("abPlayB").onclick = () => abPlay("B", false);
+$("abSwap").onclick = () => abPlay(abSide === "A" ? "B" : "A", true);
+
+// ---- 上傳自己的音檔（放進角色資料夾，後製／A/B／複製都能選） ----
+for (const id of ["upbtn", "upbtn2"]) $(id).onclick = () => $("upfile").click();
+$("upfile").onchange = async () => {
+  const file = $("upfile").files[0];
+  $("upfile").value = "";
+  if (!file) return;
+  err("");
+  try {
+    const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] || ""); r.onerror = () => no(r.error); r.readAsDataURL(file); });
+    const j = await api("/api/upload", {role: role(), name: file.name, data});
+    await loadState();
+    $("src").value = j.file; loadSrc();
+  } catch (e) { err(e); }
+};
+
+// ---- 造聲（描述）與複製（本人錄音）：都會在雲端專案建一個音色 ----
+async function createVoice(path, body, btn, what) {
+  if (!confirm(`${what}：會在雲端專案建立一個音色（今天第 ${S.designs + 1}/${S.design_daily} 個）。\n免費層可建；會不會也算進 flash 次數還沒驗證。\n\n代號：${body.name}`)) return;
+  err(""); btn.disabled = true; $("dout").textContent = `${what}中…（約 10～60 秒）`; $("daudio").hidden = true;
+  try {
+    const j = await api(path, body);
+    $("dout").textContent = `完成：${j.id}（第 ${j.n} 版，已選進「音色」）`;
+    await loadVoices().catch(e => err("音色清單讀不到：" + e.message));
+    await loadState();
+    setSel($("voice"), j.id); showDiff();
+    if (j.sample) { $("daudio").hidden = false; $("daudio").src = audioUrl(j.sample); }
+  } catch (e) { $("dout").textContent = ""; err(e); await loadState().catch(() => {}); }
+  finally { btn.disabled = false; }
+}
+const vbase = () => ({role: role(), name: $("dname").value.trim(), lang: $("dlang").value.trim()});
+$("design").onclick = () => createVoice("/api/design", {...vbase(), gender: $("dgender").value, desc: $("ddesc").value}, $("design"), "用描述造聲");
+$("replicate").onclick = () => {
+  if (!$("rown").checked) return err("複製只限你本人的聲音：先勾「這是我本人的聲音，我同意上傳 Google 建立音色」");
+  createVoice("/api/replicate", {...vbase(), source: $("rsrc").value, consent: $("rcon").value, own_voice: true}, $("replicate"), "複製聲音");
+};
 
 for (const id of ["pitch", "tempo", "pause", "gain"]) { $(id).oninput = showFx; $(id).onchange = preview; }
 for (const id of ["voice", "model", "base", "cues", "styles"]) $(id).addEventListener("input", showDiff);
@@ -235,12 +430,14 @@ setInterval(() => fetch("/api/ping").catch(() => {}), 30000);  // 桌面捷徑�
   try {
     showFx();
     const r = await api("/api/roles");
-    if (!r.roles.length) return err("lab\\ 底下還沒有角色資料夾。先照 SKILL.md 第 1 階段建一個（例如把 examples\\範例角色 整夾複製到 lab\\）。");
+    showKey(r.has_key);
+    if (!r.has_key) $("keybox").open = true;  // 只在開啟時展開一次；只做後製的人可以收起來
+    if (!r.roles.length) return err(`${r.lab} 底下還沒有角色資料夾。先照 SKILL.md 第 1 階段建一個（例如把 examples\\範例角色 整夾複製過去）。`);
     for (const x of r.roles) $("role").add(new Option(x, x));
     try { const saved = localStorage.getItem("gvl-role"); if (saved && r.roles.includes(saved)) $("role").value = saved; } catch {}
-    $("role").onchange = () => { try { localStorage.setItem("gvl-role", role()); } catch {} err(""); loadState().catch(err); };
+    $("role").onchange = () => { try { localStorage.setItem("gvl-role", role()); } catch {} err(""); loadState(true).catch(err); };
     await loadVoices().catch(e => err("音色清單讀不到：" + e.message));
-    await loadState();
+    await loadState(true);
   } catch (e) { err(e); }
 })();
 </script>

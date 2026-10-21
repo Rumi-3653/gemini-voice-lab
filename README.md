@@ -45,11 +45,18 @@ python scripts\tts_gemini.py --cues examples\範例角色\cues.txt --styles exam
 python scripts\ui.py               # 開 http://127.0.0.1:8765/（--port 改埠、--no-browser 不自動開）
 python scripts\ui.py --selfcheck   # 離線自檢（不連網、0 次請求）
 python scripts\ui.py --install-shortcut   # Windows：桌面建「聲音實驗室」捷徑（Edge 獨立視窗、不跳黑窗）
+python scripts\ui.py --lab D:\某處\角色們   # 角色資料夾放在 repo 外；配 --install-shortcut 會寫進捷徑
 ```
 
 桌面捷徑：已經開著時再點只會叫出視窗、不會開第二份；關掉視窗約 3 分鐘後伺服器自己結束。沒有主控台時的訊息寫在 `lab\.ui.log`。
 
 左邊改音色／底色／配音譜後按「生成」（每按一次用 1 次請求，固定 `--one-request`）；右邊用滑桿調音高、語速、句間停頓、音量（本機後製，不花請求，需 `numpy`）。每輪自動記進 `lab\<角色>\回合日誌.md`，評語直接在頁面上打。介面只綁本機、不改 `learnings/rules.md`——規則歸納仍照 `SKILL.md` 做。
+
+- **金鑰**：右上角「未設定金鑰」點開貼上；勾「記住」會寫進 Windows 使用者環境變數（等同 `setx`）。金鑰只交給本機腳本，不回傳頁面、不寫日誌；驗證用 `voices.py list`，不花生成額度。
+- **波形**：原始／調整後兩條波形同一個時間尺，停頓拉長多少一眼看得出；點波形跳到該位置。
+- **A/B 對聽**：日誌區選兩個檔，「A⇄B 切換」停在同一個時間點換邊。
+- **上傳音檔**：把自己的錄音放進角色資料夾，後製、A/B、複製聲音都能選。
+- **造聲**：用描述造（`voices.py design`）或複製你本人的聲音（`voices.py replicate`，參考音 10~30 秒＋授權句 ≥3 秒，要勾「是我本人、同意上傳 Google」）；兩種合計每天最多 3 個，建好自動選進音色選單，日誌記一列「造聲N」。
 
 ## 兩種造聲
 
@@ -78,7 +85,7 @@ gemini-voice-lab/
 │   ├── tts_gemini.py     合成引擎（配音譜、風格表、--one-request、--dry-run、SRT）
 │   ├── cues.py           配音譜解析（純函式）
 │   ├── stretch_pauses.py 後製：拉長句間空白（0 次請求）
-│   ├── ui.py / ui.html   本機微調介面（生成＋後製＋回合日誌）；--selfcheck 離線自檢
+│   ├── ui.py / ui.html   本機微調介面（生成＋後製＋波形＋A/B＋造聲／複製＋回合日誌）；--selfcheck 離線自檢
 │   └── voices.py         自建音色的列／查／刪／建／探針；--selfcheck 離線自檢
 ├── learnings/            規則庫（rules.md）、API 事實（api-facts.md）、schema（README.md）
 ├── examples/範例角色/     可直接跑的起手範本：基準稿、cues、styles、空白回合日誌
@@ -100,6 +107,6 @@ gemini-voice-lab/
 - **Three handles**: voice (persona/accent, built once), style (one short sentence per segment), text (verbatim wording, replacements, inline tags). A listener's one-line comment is mapped to exactly one of them.
 - **Voices**: design a character voice or replicate your own (consent-gated, yourself only) in AI Studio's web UI, or via `scripts/voices.py` (list/get/delete/design/replicate/probe).
 - **Rules library**: every comment is written back to `learnings/rules.md` (trial -> confirmed after a second check on a different sentence; overturned entries are kept).
-- **Local UI (optional)**: `python scripts/ui.py` opens a localhost-only page to regenerate (one request per click) and to post-tune pitch, tempo, pauses and volume for free; every round is logged to the character's round log.
+- **Local UI (optional)**: `python scripts/ui.py` opens a localhost-only page to regenerate (one request per click) and to post-tune pitch, tempo, pauses and volume for free (with waveforms and A/B switching); it can also take your API key, upload your own recordings, and create voices (design from a description, or replicate your own voice behind a consent checkbox, 3 per day); every round is logged to the character's round log.
 - **Requirements**: Python 3.10+, `pip install google-genai`, ffmpeg, `GEMINI_API_KEY` (the local UI also needs `numpy`, an ffmpeg build with rubberband, and `tzdata` on Windows). Run `python scripts/voices.py --selfcheck` (offline) and a `--dry-run` first.
 - **License**: MIT.

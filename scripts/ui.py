@@ -3,6 +3,7 @@
 
   python scripts\\ui.py                          # 開 http://127.0.0.1:8765/ 並自動開瀏覽器
   python scripts\\ui.py --port 9000 --no-browser
+  python scripts\\ui.py --lab D:\\某處\\角色們          # 角色資料夾放在別處（預設＝本 skill 的 lab\\）
   python scripts\\ui.py --selfcheck              # 離線自檢（不連網、0 額度）
 
 生成呼叫同目錄 tts_gemini.py（固定 --one-request）；後製呼叫 stretch_pauses.py ＋ ffmpeg rubberband。
@@ -10,6 +11,7 @@
 金鑰只交給子程序，不回前端、不寫檔、不印。
 """
 import argparse
+import base64
 import datetime
 import json
 import math
@@ -35,13 +37,14 @@ if sys.stdout is None or sys.stderr is None:  # pythonw（桌面捷徑）沒有�
 sys.path.insert(0, HERE)
 try:
     from tts_gemini import VOICES
-    from voices import _key
+    from voices import CONSENT_TEXT, SLUG, _key
 except ImportError as e:
     sys.exit(f"找不到同目錄的 tts_gemini.py／voices.py（{e}）")
 
 LAB = os.path.join(ROOT, "lab")  # selfcheck 會暫時換成暫存夾
 TEMPLATE_LOG = os.path.join(ROOT, "examples", "範例角色", "回合日誌.md")
 LOG_NAME, LAST_NAME, PREVIEW_NAME = "回合日誌.md", ".ui_last.json", ".preview.mp3"
+VOICE_SUB, DESIGN_MODEL, DESIGN_DAILY = "voice", "造聲", 3  # 造聲描述／試聽放 <角色>\voice\；SKILL.md：確認共不共用 flash 前每天 ≤3
 def _zones(zi=ZoneInfo):
     """Windows 的 Python 沒內建 IANA 時區庫，要 pip 裝 tzdata；缺了就講清楚再退出。"""
     try:
@@ -52,12 +55,16 @@ def _zones(zi=ZoneInfo):
 
 PT, TW = _zones()
 FLASH_DAILY, FLASH_RESERVE = 10, 2
-AUDIO_EXT = (".mp3", ".wav", ".m4a")
+AUDIO_EXT = (".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac")
+UPLOAD_MAX = 30 * 2 ** 20  # 上傳音檔上限（bytes）；30 秒手機錄音遠小於此
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW：pythonw 底下叫 ffmpeg／python 不閃黑窗
 BAD_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 VOICE_OK = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,79}$")
 RND = re.compile(r"^r(\d+)", re.I)
 BASE_LINE = re.compile(r"^\s*底色\s*[:：]\s*(.*)$")
+LANG_OK = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,4})?$")
+KEY_OK = re.compile(r"[\x21-\x7e]{20,200}")
+DESIGN_N = re.compile(r"^(?:desc|design|clone)-(\d+)\.", re.I)
 GEN_KEYS = [("voice", "音色"), ("model", "模型"), ("base", "底色"), ("cues", "台詞"), ("styles", "風格表")]
 
 
@@ -72,7 +79,7 @@ def safe_name(name: str) -> str:
 def role_dir(role: str) -> str:
     d = os.path.join(LAB, safe_name(role))
     if not os.path.isdir(d):
-        raise ValueError(f"沒有這個角色資料夾：lab\\{role}")
+        raise ValueError(f"沒有這個角色資料夾：{d}")
     return d
 
 
@@ -187,6 +194,12 @@ def next_round(d: str, rows: list) -> str:
     return f"r{max(nums, default=0) + 1:02d}"
 
 
+def next_design(vd: str) -> int:
+    """<角色>\\voice\\ 裡 desc-N／design-N 取最大 N +1（接著 SKILL.md 手動造聲的編號走）。"""
+    names = os.listdir(vd) if os.path.isdir(vd) else []
+    return max((int(m.group(1)) for m in (DESIGN_N.match(n) for n in names) if m), default=0) + 1
+
+
 # ---------- 額度帳面（429 才是真相） ----------
 def now_tw() -> datetime.datetime:
     return datetime.datetime.now(TW)
@@ -206,25 +219,25 @@ def parse_tw(s: str):
     return None
 
 
-def flash_used(rows: list, now=None) -> int:
-    """今天（太平洋時間日界）模型＝flash 的列數。"""
+def flash_used(rows: list, now=None, model="flash") -> int:
+    """今天（太平洋時間日界）模型＝model 的列數（造聲列用 model="造聲" 數）。"""
     today = pt_day(now or now_tw())
     n = 0
     for r in rows:
         t = parse_tw(r.get("日期", ""))
-        if r.get("模型", "").strip().lower() == "flash" and t and pt_day(t) == today:
+        if r.get("模型", "").strip().lower() == model and t and pt_day(t) == today:
             n += 1
     return n
 
 
-def flash_used_all(now=None) -> int:
-    """額度是整把 key 共用：lab\\ 底下所有角色日誌的 flash 列加總（讀不了的日誌略過）。"""
+def flash_used_all(now=None, model="flash") -> int:
+    """額度是整把 key 共用：lab\\ 底下所有角色日誌的 flash（或造聲）列加總（讀不了的日誌略過）。"""
     n = 0
     for r in list_roles():
         path = os.path.join(LAB, r, LOG_NAME)
         if os.path.exists(path):
             try:
-                n += flash_used(read_rounds(path), now)
+                n += flash_used(read_rounds(path), now, model)
             except (ValueError, OSError):
                 pass
     return n
@@ -369,7 +382,38 @@ def need_key():
     try:
         _key()
     except SystemExit:
-        raise RuntimeError("沒有 GEMINI_API_KEY（到 https://aistudio.google.com/apikey 建一把，setx 後重開介面）")
+        raise RuntimeError("沒有 GEMINI_API_KEY：點右上角「未設定金鑰」貼上（到 https://aistudio.google.com/apikey 建一把）")
+
+
+def has_key() -> bool:
+    try:
+        _key()
+        return True
+    except SystemExit:
+        return False
+
+
+def remember_key(k: str):
+    """Windows：寫進 HKCU\\Environment（等同 setx），並廣播讓之後開的程式讀得到。"""
+    import ctypes
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as h:
+        winreg.SetValueEx(h, "GEMINI_API_KEY", 0, winreg.REG_SZ, k)
+    ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x1A, 0, "Environment", 0x2, 3000, None)  # WM_SETTINGCHANGE
+
+
+def do_key(p: dict) -> dict:
+    """設定金鑰：本程序 env（子程序繼承）；remember＝也寫進使用者環境變數。只回驗證結果，不回金鑰。"""
+    k = str(p.get("key") or "").strip()
+    if not KEY_OK.fullmatch(k):
+        raise ValueError("金鑰格式不對（AI Studio 的 key 通常是 AIza 開頭、39 個英數字元，不含空白）")
+    os.environ["GEMINI_API_KEY"] = k  # tts_gemini.api_key() 先看這個，GOOGLE_API_KEY 只是後備
+    saved = bool(p.get("remember")) and sys.platform == "win32"
+    if saved:
+        remember_key(k)
+    _VOICES.pop("custom", None)
+    v = get_voices()  # voices.py list：不計 TTS 額度，順便驗證金鑰能不能用
+    return {"saved": saved, "check": v["error"] or "ok", "custom": len(v["custom"])}
 
 
 def _gen_params(p: dict) -> dict:
@@ -403,7 +447,8 @@ def get_state(role: str) -> dict:
         except OSError:
             return ""
     base, styles = split_styles(read("styles.txt"))
-    last, rows, log_error = load_last(d), [], ""
+    vd, last, rows, log_error = os.path.join(d, VOICE_SUB), load_last(d), [], ""
+    nd = next_design(vd)
     if os.path.exists(os.path.join(d, LOG_NAME)):
         try:
             rows = read_rounds(os.path.join(d, LOG_NAME))
@@ -413,6 +458,9 @@ def get_state(role: str) -> dict:
             "voice": last.get("voice") or "Sulafat", "model": last.get("model") or "flash",
             "rounds": rows, "log_error": log_error, "audio": list_audio(d), "next": next_round(d, rows),
             "used": flash_used_all(), "daily": FLASH_DAILY, "reserve": FLASH_RESERVE,
+            "designs": flash_used_all(model=DESIGN_MODEL), "design_daily": DESIGN_DAILY,
+            "next_design": nd, "desc": read(os.path.join(VOICE_SUB, f"desc-{nd - 1}.txt")).strip(),
+            "samples": list_audio(vd) if os.path.isdir(vd) else [], "consent_text": CONSENT_TEXT, "has_key": has_key(),
             "exhausted": STATE["exhausted_day"] == pt_day(now_tw()), "reset": reset_at()}
 
 
@@ -497,6 +545,99 @@ def do_save(p: dict) -> dict:
         GEN_LOCK.release()
 
 
+def _voice_job(p: dict, kind: str, prep) -> dict:
+    """造聲（design）與複製（replicate）共用：鎖、每日上限、金鑰、跑 voices.py、解析 fact、日誌記一列「造聲N」。
+    prep(vd, n) → (voices.py 子命令參數, 日誌說明, 失敗時的收尾)；試聽存 <角色>\\voice\\<kind>-N.wav。"""
+    d = role_dir(p.get("role", ""))
+    name, lang = str(p.get("name") or ""), str(p.get("lang") or "")
+    if not SLUG.fullmatch(name):
+        raise ValueError("音色代號只收英數、底線、連字號（1~40 字）；中文名字寫在角色卡")
+    if not LANG_OK.fullmatch(lang):
+        raise ValueError(f"語言碼不合法：{lang!r}（台灣國語用 cmn-TW）")
+    if not GEN_LOCK.acquire(blocking=False):
+        raise Busy("上一個生成／造聲還在跑，等它完成")
+    try:
+        log = ensure_log(d)
+        read_rounds(log)  # 日誌壞了就在建音色前停下
+        used = flash_used_all(model=DESIGN_MODEL)
+        if used >= DESIGN_DAILY:
+            raise ValueError(f"今天已造 {used} 個音色（上限 {DESIGN_DAILY}），台灣 {reset_at()} 後再來")
+        need_key()
+        vd = os.path.join(d, VOICE_SUB)
+        os.makedirs(vd, exist_ok=True)
+        n = next_design(vd)
+        args, note, undo = prep(vd, n)
+        try:
+            out = _run([sys.executable, os.path.join(HERE, "voices.py"), *args, "--name", name, "--lang", lang,
+                        "--out", os.path.join(vd, f"{kind}-{n}.wav")], timeout=180)
+        except RuntimeError as e:
+            undo()
+            raise RuntimeError(f"{e}\n（若是連線中斷，跑 python scripts\\voices.py list 看有沒有多建）")
+        _VOICES.pop("custom", None)  # 音色選單下次重抓
+        try:
+            fact = json.loads(out.strip().splitlines()[-1])
+            vid = fact["id"]
+        except (ValueError, IndexError, KeyError, TypeError):  # 音色多半已建好：原文給人看，id 不能吞掉
+            raise RuntimeError("造聲回傳看不懂，音色可能已建立（voices.py list 確認）：\n" + out[-400:])
+        exp = str(fact.get("expire_time") or "")[:10]
+        append_round(log, {"輪": f"造聲{n}", "日期": now_tw().strftime("%Y-%m-%d %H:%M"), "模型": DESIGN_MODEL,
+                           "flash": "-", "只改了什麼": f"{vid}（{name}，{lang}，到期 {exp}）：{note}"})
+        return {"id": vid, "name": name, "n": n, "designs": used + 1,
+                "sample": f"{VOICE_SUB}/{kind}-{n}.wav" if fact.get("sample") else ""}
+    finally:
+        GEN_LOCK.release()
+
+
+def do_design(p: dict) -> dict:
+    """用描述造 prompted 音色（存進雲端專案）；描述落 voice\\desc-N.txt。"""
+    gender, desc = str(p.get("gender") or ""), " ".join(str(p.get("desc") or "").split())
+    if gender not in ("female", "male", "neutral"):
+        raise ValueError(f"性別只能是 female／male／neutral：{gender!r}")
+    if not desc or len(desc) > 600:
+        raise ValueError("描述寫 1~2 句英文（600 字元內）")
+
+    def prep(vd, n):
+        path = os.path.join(vd, f"desc-{n}.txt")
+        _write_text(path, desc + "\n")
+        return ["design", "--gender", gender, "--desc-file", path], desc, lambda: os.remove(path)
+    return _voice_job(p, "design", prep)
+
+
+def do_replicate(p: dict) -> dict:
+    """用使用者本人的錄音複製音色：參考音 10~30 秒＋授權句 ≥3 秒（秒數閘在 voices.py，上傳 Google 前就擋）。"""
+    if p.get("own_voice") is not True:
+        raise ValueError("複製只限你本人的聲音：勾選「這是我本人的聲音，同意上傳 Google 建立音色」才送得出")
+    d = role_dir(p.get("role", ""))
+    sname, spath = _src(d, {"src": p.get("source")})
+    cname, cpath = _src(d, {"src": p.get("consent")})
+    if sname == cname:
+        raise ValueError("參考音和授權句不能是同一個檔")
+    return _voice_job(p, "clone", lambda vd, n: (["replicate", "--source", spath, "--consent", cpath],
+                                                 f"本人複製，參考音 {sname}、授權句 {cname}", lambda: None))
+
+
+def do_upload(p: dict) -> dict:
+    """把使用者自己的音檔（base64）存進角色資料夾：後製、A/B、複製都能選。不覆寫；rNN 開頭加 up- 免得搶輪次號。"""
+    d = role_dir(p.get("role", ""))
+    name = safe_name(os.path.basename(str(p.get("name") or "").replace("\\", "/")))
+    if not name.lower().endswith(AUDIO_EXT):
+        raise ValueError(f"只收音檔（{'、'.join(AUDIO_EXT)}）：{name}")
+    if RND.match(name):
+        name = "up-" + name
+    try:
+        data = base64.b64decode(str(p.get("data") or ""), validate=True)
+    except (ValueError, TypeError):
+        raise ValueError("音檔內容不是 base64")
+    if not data or len(data) > UPLOAD_MAX:
+        raise ValueError(f"音檔要在 {UPLOAD_MAX // 2 ** 20} MB 內")
+    path = os.path.join(d, name)
+    if os.path.exists(path):
+        raise ValueError(f"已經有同名檔：{name}（先改檔名再上傳）")
+    with open(path, "xb") as f:
+        f.write(data)
+    return {"file": name}
+
+
 def do_comment(p: dict) -> dict:
     d = role_dir(p.get("role", ""))
     set_comment(ensure_log(d), str(p.get("round") or ""), str(p.get("comment") or ""))
@@ -507,21 +648,26 @@ def do_comment(p: dict) -> dict:
 TOKEN = secrets.token_urlsafe(16)
 ALLOWED_HOSTS = set()  # 綁好埠後填入；擋 DNS rebinding
 ROUTES = {"/api/dryrun": do_dryrun, "/api/generate": do_generate, "/api/preview": do_preview,
-          "/api/save": do_save, "/api/comment": do_comment}
-MIME = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4"}
+          "/api/save": do_save, "/api/comment": do_comment, "/api/design": do_design,
+          "/api/replicate": do_replicate, "/api/upload": do_upload, "/api/key": do_key}
+MIME = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".flac": "audio/flac", ".ogg": "audio/ogg",
+        ".aac": "audio/aac"}
+MAX_BODY = UPLOAD_MAX * 4 // 3 + 65536  # base64 膨脹 4/3 ＋ JSON 其餘欄位
 
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+    def _send(self, code, body, ctype="application/json; charset=utf-8", headers=None):
         if not isinstance(body, bytes):
             body = json.dumps(body, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -548,15 +694,27 @@ class Handler(BaseHTTPRequestHandler):
     def _audio(self, rel: str):
         try:
             parts = rel.split("/")
-            if len(parts) != 2:
+            if len(parts) == 3 and parts[1] == VOICE_SUB:  # 造聲試聽：<角色>/voice/design-N.wav
+                d, name = os.path.join(role_dir(parts[0]), VOICE_SUB), safe_name(parts[2])
+            elif len(parts) == 2:
+                d, name = role_dir(parts[0]), safe_name(parts[1])
+            else:
                 raise ValueError("路徑不合法")
-            d, name = role_dir(parts[0]), safe_name(parts[1])
             ext = os.path.splitext(name)[1].lower()
             path = os.path.join(d, name)
             if ext not in MIME or not os.path.isfile(path):
                 return self._send(404, {"error": f"沒有這個音檔：{name}"})
             with open(path, "rb") as f:
-                self._send(200, f.read(), MIME[ext])
+                data = f.read()
+            # Range：沒有它 Chrome 的 <audio> 不能跳轉（拖進度條、點波形、A/B 停在同一點都靠這個）
+            m, n = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "").strip()), len(data)
+            if not m or not (m.group(1) or m.group(2)):
+                return self._send(200, data, MIME[ext], {"Accept-Ranges": "bytes"})
+            a, b = m.groups()
+            start, end = (int(a), min(int(b) if b else n - 1, n - 1)) if a else (max(0, n - int(b)), n - 1)
+            if start > end:
+                return self._send(416, b"", MIME[ext], {"Content-Range": f"bytes */{n}"})
+            self._send(206, data[start:end + 1], MIME[ext], {"Accept-Ranges": "bytes", "Content-Range": f"bytes {start}-{end}/{n}"})
         except ValueError as e:
             self._send(400, {"error": str(e)})
 
@@ -571,7 +729,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/ping":
             return self._send(200, {"ok": True})
         if u.path == "/api/roles":
-            return self._dispatch(lambda: {"roles": list_roles()})
+            return self._dispatch(lambda: {"roles": list_roles(), "lab": LAB, "has_key": has_key()})
         if u.path == "/api/state":
             return self._dispatch(get_state, q.get("role", ""))
         if u.path == "/api/voices":
@@ -587,7 +745,13 @@ class Handler(BaseHTTPRequestHandler):
         if not fn:
             return self._send(404, {"error": "找不到"})
         try:
-            p = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            size = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self._send(400, {"error": "Content-Length 不合法"})
+        if size > MAX_BODY:
+            return self._send(413, {"error": f"請求太大（上限約 {UPLOAD_MAX // 2 ** 20} MB 音檔）"})
+        try:
+            p = json.loads(self.rfile.read(size) or b"{}")
             if not isinstance(p, dict):
                 raise ValueError
         except ValueError:
@@ -640,25 +804,26 @@ def open_ui(url: str, app: bool, reuse: bool = False):
         webbrowser.open(url)
 
 
-def shortcut_ps(pyw: str, script: str, root: str) -> str:
-    """建桌面捷徑的 PowerShell 指令（路徑裡的單引號跳脫成兩個）。"""
+def shortcut_ps(pyw: str, script: str, root: str, lab: str = "") -> str:
+    """建桌面捷徑的 PowerShell 指令（路徑裡的單引號跳脫成兩個）；lab 有給就帶 --lab。"""
     q = lambda s: s.replace("'", "''")  # noqa: E731
+    extra = f' --lab "{q(lab)}"' if lab else ""
     return ("[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
             "$d=[Environment]::GetFolderPath('Desktop');$p=Join-Path $d '聲音實驗室.lnk';"
             "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($p);"
-            f"$s.TargetPath='{q(pyw)}';$s.Arguments='\"{q(script)}\" --app';$s.WorkingDirectory='{q(root)}';"
+            f"$s.TargetPath='{q(pyw)}';$s.Arguments='\"{q(script)}\" --app{extra}';$s.WorkingDirectory='{q(root)}';"
             "$s.IconLocation=(Join-Path $env:SystemRoot 'System32\\SndVol.exe')+',0';"
             "$s.Description='gemini-voice-lab 微調介面';$s.Save();$p")
 
 
-def install_shortcut():
+def install_shortcut(lab: str = ""):
     if sys.platform != "win32":
         sys.exit("--install-shortcut 只支援 Windows；其他系統用 python scripts/ui.py 開")
     pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")  # pythonw：雙擊不跳黑色命令視窗
     if not os.path.isfile(pyw):
         pyw = sys.executable
     print("已建立：" + _run(["powershell", "-NoProfile", "-Command",
-                            shortcut_ps(pyw, os.path.abspath(__file__), ROOT)], timeout=30).strip())
+                            shortcut_ps(pyw, os.path.abspath(__file__), ROOT, lab)], timeout=30).strip())
 
 
 def ui_alive(port: int) -> bool:
@@ -945,6 +1110,91 @@ def _check_http(tmp):
         assert st == 400 and "輪次" in j["error"] and calls == [], j
         assert _read_lines(logp) == ["# 壞掉的日誌"]
         _write_lines(logp, good)
+
+        # 造聲：假 voices.py design；描述落 voice\desc-N.txt（接手動編號）、日誌記「造聲N」不佔輪次號、每天上限、選單快取清掉
+        def design_run(cmd, timeout=600):
+            calls.append(cmd)
+            wav = cmd[cmd.index("--out") + 1]
+            _tone_wav(wav)
+            return '{"id": "voice_fake%d", "expire_time": "2027-10-21T00:00:00+00:00", "sample": "%s"}\n' % (
+                len(calls), wav.replace("\\", "/"))
+
+        def design_fail(cmd, timeout=600):
+            raise RuntimeError("Gemini 拒絕請求（400）: bad desc")
+        _run = design_run
+        calls.clear()
+        vd = os.path.join(d, VOICE_SUB)
+        os.makedirs(vd)
+        open(os.path.join(vd, "desc-1.txt"), "w").close()  # 手動造過第 1 版
+        _VOICES["custom"] = []
+        vform = {"role": role, "name": "test-voice", "gender": "female", "lang": "cmn-TW",
+                 "desc": "A calm  woman,\n Taiwanese Mandarin accent."}
+        st, j = req("POST", "/api/design", vform)
+        assert st == 200 and (j["id"], j["n"], j["sample"], j["designs"]) == ("voice_fake1", 2, "voice/design-2.wav", 1), j
+        assert "custom" not in _VOICES and calls[-1][2] == "design" and "cmn-TW" in calls[-1]
+        with open(os.path.join(vd, "desc-2.txt"), encoding="utf-8") as f:
+            assert f.read() == "A calm woman, Taiwanese Mandarin accent.\n"
+        s = state()
+        assert (s["designs"], s["design_daily"], s["next_design"], s["next"]) == (1, DESIGN_DAILY, 3, "r03"), s
+        assert s["desc"] == "A calm woman, Taiwanese Mandarin accent." and s["samples"] == ["design-2.wav"]
+        assert (s["rounds"][-1]["輪"], s["rounds"][-1]["模型"]) == ("造聲2", DESIGN_MODEL)
+        assert "voice_fake1" in s["rounds"][-1]["只改了什麼"] and s["used"] == base_used + 2  # 造聲列不算 flash
+        assert req("GET", f"/audio/{quote(role)}/voice/design-2.wav")[0] == 200
+        assert req("GET", f"/audio/{quote(role)}/other/design-2.wav")[0] == 400
+        assert req("GET", f"/audio/{quote(role)}/voice/..%5Cx.wav")[0] == 400
+        for bad in ({"name": "中文"}, {"name": "a\n"}, {"gender": "x"}, {"lang": "cmn TW"}, {"desc": " "}, {"role": "../x"}):
+            assert req("POST", "/api/design", dict(vform, **bad))[0] == 400, bad
+        _run = design_fail  # 失敗：描述檔收回、不記日誌、不佔每日次數
+        assert req("POST", "/api/design", vform)[0] == 502
+        assert not os.path.exists(os.path.join(vd, "desc-3.txt")) and state()["designs"] == 1
+        # 上傳自己的音檔：存進角色資料夾、不覆寫、rNN 開頭改名、只收音檔
+        _tone_wav(os.path.join(tmp, "tone.wav"))
+        with open(os.path.join(tmp, "tone.wav"), "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        up = lambda name, data=b64: req("POST", "/api/upload", {"role": role, "name": name, "data": data})  # noqa: E731
+        assert up("我的聲音.wav") == (200, {"file": "我的聲音.wav"})
+        assert up("C:\\fakepath\\授權句.m4a") == (200, {"file": "授權句.m4a"})  # 瀏覽器給的假路徑只留檔名
+        assert up("r50.wav") == (200, {"file": "up-r50.wav"}) and state()["next"] == "r03"
+        assert up("..\\..\\x.wav") == (200, {"file": "x.wav"}) and os.path.isfile(os.path.join(d, "x.wav"))  # 只留檔名，跳不出角色夾
+        for bad in (up("我的聲音.wav"), up("x.exe"), up(".."), up("y.wav", "不是base64!"), up("z.wav", "")):
+            assert bad[0] == 400, bad
+        assert {"我的聲音.wav", "授權句.m4a", "up-r50.wav"} <= set(state()["audio"])
+        # 複製：沒勾本人同意、同一個檔、不存在的檔 → 400；成功 → 試聽 voice\clone-N.wav、日誌列、跟造聲共用每日上限
+        _run = design_run
+        rform = {"role": role, "name": "me", "lang": "cmn-TW", "source": "我的聲音.wav", "consent": "授權句.m4a", "own_voice": True}
+        for bad in ({"own_voice": False}, {"own_voice": "true"}, {"consent": "我的聲音.wav"}, {"source": "沒這個.wav"}):
+            assert req("POST", "/api/replicate", dict(rform, **bad))[0] == 400, bad
+        st, j = req("POST", "/api/replicate", rform)
+        assert st == 200 and (j["n"], j["sample"], j["designs"]) == (3, "voice/clone-3.wav", 2), j
+        assert calls[-1][2:5] == ["replicate", "--source", os.path.join(d, "我的聲音.wav")]
+        s = state()
+        assert "本人複製" in s["rounds"][-1]["只改了什麼"] and "clone-3.wav" in s["samples"] and s["next_design"] == 4
+        assert s["consent_text"].startswith("我是此声音的拥有者")
+        for _ in range(DESIGN_DAILY - 2):
+            assert req("POST", "/api/design", vform)[0] == 200
+        st, j = req("POST", "/api/design", vform)
+        assert st == 400 and "上限" in j["error"] and state()["designs"] == DESIGN_DAILY, j
+        # 金鑰：設進本程序 env、用 voices.py list 驗證、絕不回傳；remember=False 不碰登錄檔
+        def list_run(cmd, timeout=600):
+            calls.append(cmd)
+            return '[{"id": "voice_a", "display_name": "a"}]'
+        _run = list_run
+        old_key = os.environ.get("GEMINI_API_KEY")
+        fake_key = "AIza" + "Q" * 35
+        try:
+            st, j = req("POST", "/api/key", {"key": " " + fake_key + "\n", "remember": False})
+            assert st == 200 and j == {"saved": False, "check": "ok", "custom": 1}, j
+            assert os.environ["GEMINI_API_KEY"] == fake_key and calls[-1][2:] == ["list", "--json"]
+            s = state()
+            assert s["has_key"] and fake_key not in json.dumps(s, ensure_ascii=False)
+            for bad in ("", "AIza短", "AIza " + "Q" * 30, "金" * 30, "Q" * 201):
+                assert req("POST", "/api/key", {"key": bad})[0] == 400, bad
+        finally:
+            if old_key is None:
+                os.environ.pop("GEMINI_API_KEY", None)
+            else:
+                os.environ["GEMINI_API_KEY"] = old_key
+            _VOICES.pop("custom", None)
     finally:
         _run, need_key = real_run, real_key
     # 後製（真 ffmpeg）＋評語＋音檔供應
@@ -969,6 +1219,14 @@ def _check_http(tmp):
     assert s["used"] == base_used + 2 and "r03.mp3" in s["audio"] and PREVIEW_NAME not in s["audio"]
     st, raw = req("GET", f"/audio/{quote(role)}/r03.mp3")
     assert st == 200 and len(raw) > 1000
+    for rng, code, body, cr in (("bytes=0-9", 206, raw[:10], f"bytes 0-9/{len(raw)}"), ("bytes=-4", 206, raw[-4:], None),
+                                ("bytes=10-", 206, raw[10:], None), (f"bytes={len(raw)}-", 416, b"", f"bytes */{len(raw)}")):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+        c.request("GET", f"/audio/{quote(role)}/r03.mp3", headers={"Range": rng})
+        r = c.getresponse()
+        assert (r.status, r.read()) == (code, body), rng
+        assert cr is None or r.getheader("Content-Range") == cr, (rng, r.getheader("Content-Range"))
+        c.close()
     assert req("GET", f"/audio/{quote(role)}/{quote(PREVIEW_NAME)}")[0] == 200
     assert req("GET", f"/audio/{quote(role)}/{quote(LAST_NAME)}")[0] == 404
     assert req("GET", "/audio/%2E%2E%2Fx/a.mp3")[0] == 400
@@ -1012,6 +1270,7 @@ def _check_desktop(tmp):
     ps = shortcut_ps("C:\\Py\\pythonw.exe", "D:\\x'y\\scripts\\ui.py", "D:\\x'y")
     assert "D:\\x''y\\scripts\\ui.py" in ps and "--app" in ps and "聲音實驗室.lnk" in ps and "SndVol.exe" in ps
     assert ps.startswith("[Console]::OutputEncoding")  # 回傳的路徑要是 UTF-8，不然中文檔名印成亂碼
+    assert "--lab" not in ps and '--app --lab "D:\\v\'\'l"\'' in shortcut_ps("p", "s", "r", "D:\\v'l")
 
 
 def selfcheck():
@@ -1034,14 +1293,20 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true", help="不自動開瀏覽器")
     ap.add_argument("--app", action="store_true", help="Edge 獨立視窗開；視窗關掉 3 分鐘後自動結束（桌面捷徑用）")
+    ap.add_argument("--lab", help="角色資料夾的上層（預設＝本 skill 的 lab\\）；配 --install-shortcut 會寫進捷徑")
     ap.add_argument("--install-shortcut", action="store_true", help="在桌面建「聲音實驗室」捷徑（Windows）")
     ap.add_argument("--selfcheck", action="store_true", help="離線自檢（不連網、0 額度）")
     a = ap.parse_args()
     if a.selfcheck:
         selfcheck()
         return
+    if a.lab:
+        global LAB
+        LAB = os.path.abspath(a.lab)
+        if not os.path.isdir(LAB):
+            sys.exit(f"--lab 資料夾不存在：{LAB}")
     if a.install_shortcut:
-        install_shortcut()
+        install_shortcut(LAB if a.lab else "")
         return
     serve(a.port, not a.no_browser, app=a.app, idle_secs=180 if a.app else 0)
 
