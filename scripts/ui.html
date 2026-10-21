@@ -4,9 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>聲音實驗室</title>
+<script>/* 配色在畫面出來前就套上，免得閃一下預設色 */try{document.documentElement.dataset.theme=localStorage.getItem("gvl-theme")||"auto"}catch(e){document.documentElement.dataset.theme="auto"}</script>
 <style>
-:root{--bg:#f6f5f2;--card:#fff;--fg:#1f1f1d;--muted:#6b6a66;--line:#e2e0da;--warn:#854f0b;--warnbg:#faeeda;--ok:#3b6d11;--accent:#185fa5;--accentbg:#e6f1fb;--danger:#a32d2d}
-@media (prefers-color-scheme:dark){:root{--bg:#1c1c1b;--card:#262624;--fg:#ecebe6;--muted:#a3a29c;--line:#3a3936;--warn:#fac775;--warnbg:#412402;--ok:#97c459;--accent:#85b7eb;--accentbg:#042c53;--danger:#f09595}}
+/* 配色：預設米白；auto＝跟隨系統（深色時用下面那組）；其餘三套由右上角「配色」選單切換。文字對比度都 ≥4.5 */
+:root{color-scheme:light;--bg:#f6f5f2;--card:#fff;--fg:#1f1f1d;--muted:#6b6a66;--line:#e2e0da;--warn:#854f0b;--warnbg:#faeeda;--ok:#3b6d11;--accent:#185fa5;--accentbg:#e6f1fb;--danger:#a32d2d}
+@media (prefers-color-scheme:dark){:root[data-theme="auto"]{color-scheme:dark;--bg:#1c1c1b;--card:#262624;--fg:#ecebe6;--muted:#a3a29c;--line:#3a3936;--warn:#fac775;--warnbg:#412402;--ok:#97c459;--accent:#85b7eb;--accentbg:#042c53;--danger:#f09595}}
+:root[data-theme="night"]{color-scheme:dark;--bg:#15171a;--card:#1f2329;--fg:#e8eaed;--muted:#9aa0a6;--line:#343a42;--warn:#fbbf24;--warnbg:#3a2e0b;--ok:#4ade80;--accent:#2dd4bf;--accentbg:#0f3b37;--danger:#f87171}
+:root[data-theme="sage"]{--bg:#eef0ec;--card:#fbfcfa;--fg:#2f3a33;--muted:#5f6b63;--line:#d9ded8;--warn:#93573b;--warnbg:#f3e6de;--ok:#3f6b43;--accent:#4d705d;--accentbg:#e3ece6;--danger:#a8443a}
+:root[data-theme="sunset"]{--bg:#fff7ef;--card:#fff;--fg:#3b2a20;--muted:#7d6253;--line:#f0dccb;--warn:#a91f52;--warnbg:#fbe3ec;--ok:#3f6b26;--accent:#b3471a;--accentbg:#fdeee5;--danger:#b3321f}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 system-ui,"Microsoft JhengHei",sans-serif}
 main{max-width:1100px;margin:0 auto;padding:16px}
 .bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
@@ -16,6 +21,7 @@ h2{font-size:15px;margin:0 0 8px;font-weight:600}
 .row{display:grid;grid-template-columns:72px minmax(0,1fr);gap:6px 8px;align-items:center;margin-bottom:6px}
 .sl{display:grid;grid-template-columns:72px minmax(0,1fr) 84px;gap:6px 8px;align-items:center}
 input,select,textarea,button{font:inherit;color:inherit}
+input[type=range],input[type=checkbox]{accent-color:var(--accent)}
 input[type=text],input[type=password],select,textarea{width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
 textarea{font-family:Consolas,"Microsoft JhengHei",monospace;resize:vertical}
 button{background:transparent;border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
@@ -67,6 +73,10 @@ dialog::backdrop{background:rgba(0,0,0,.35)}
     <span style="flex:1"></span>
     <span class="pill" id="quota">今日 flash –</span>
     <span class="muted" id="reset"></span>
+    <label class="muted">配色 <select id="theme" style="width:auto">
+      <option value="auto">跟隨系統（淺／深自動）</option><option value="cream">米白</option>
+      <option value="night">夜間錄音室（深色）</option><option value="sage">莫蘭迪灰綠</option><option value="sunset">暖橘日落</option>
+    </select></label>
     <details id="keybox">
       <summary class="pill" id="keystate">金鑰 –</summary>
       <div class="card keypanel">
@@ -485,6 +495,12 @@ $("gen").onclick = async () => {
   finally { $("gen").disabled = false; }
 };
 
+$("theme").value = document.documentElement.dataset.theme;
+$("theme").onchange = () => {
+  document.documentElement.dataset.theme = $("theme").value;
+  try { localStorage.setItem("gvl-theme", $("theme").value); } catch {}
+  drawWaves();  // 波形顏色是畫上去的，換配色要重畫
+};
 $("askin").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("ask").close("ok"); } };  // Enter＝確定（表單預設會按到第一顆「取消」）
 $("newrole").onclick = async () => {
   const name = await ask("新角色的名字（會變成資料夾名，中文可以）", true);
