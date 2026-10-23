@@ -1,0 +1,4 @@
+# r01：底色＝rules.md 目前底色改寫；客服語音「清楚、有禮、讓人安心」，按鍵數字要咬字清楚
+底色: Taiwanese Mandarin, polite and clear, moderate pace, sentence-final particles light, no broadcaster tone
+平穩: reassuring and attentive, crisp articulation on the numbers
+收尾: sincere and apologetic, gentle, slightly slower

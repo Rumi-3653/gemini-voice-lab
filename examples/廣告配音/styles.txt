@@ -1,0 +1,4 @@
+# r01：底色＝rules.md 目前底色改寫；廣告配音「有精神、有自信，但不推銷腔」
+底色: Taiwanese Mandarin, bright commercial read, natural pace, sentence-final particles light, no hard-sell tone
+激動: energetic and confident, punchy but natural, smiling
+收尾: warm and sincere, slower, inviting

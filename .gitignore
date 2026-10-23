@@ -7,3 +7,5 @@ __pycache__/
 *.m4a
 *.flac
 Thumbs.db
+# 範例音檔（可商用，來源與授權見 examples/_範例音檔/來源與授權.md）
+!examples/_範例音檔/*.mp3

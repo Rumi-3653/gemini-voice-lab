@@ -42,8 +42,10 @@ except ImportError as e:
     sys.exit(f"找不到同目錄的 tts_gemini.py／voices.py（{e}）")
 
 LAB = os.path.join(ROOT, "lab")  # selfcheck 會暫時換成暫存夾
-TEMPLATE_DIR = os.path.join(ROOT, "examples", "範例角色")
+EXAMPLES = os.path.join(ROOT, "examples")
+TEMPLATE_DIR = os.path.join(EXAMPLES, "範例角色")
 TEMPLATE_LOG = os.path.join(TEMPLATE_DIR, "回合日誌.md")
+SAMPLES_DIR = os.path.join(EXAMPLES, "_範例音檔")  # _ 開頭＝不是角色範本
 LOG_NAME, LAST_NAME, PREVIEW_NAME = "回合日誌.md", ".ui_last.json", ".preview.mp3"
 VOICE_SUB, DESIGN_MODEL, DESIGN_DAILY = "voice", "造聲", 3  # 造聲描述／試聽放 <角色>\voice\；SKILL.md：確認共不共用 flash 前每天 ≤3
 def _zones(zi=ZoneInfo):
@@ -639,20 +641,47 @@ def do_upload(p: dict) -> dict:
     return {"file": name}
 
 
+def list_templates() -> list:
+    """examples\\ 底下的角色範本（_ 或 . 開頭的不算，例如 _範例音檔）；範例角色排第一。"""
+    names = [n for n in os.listdir(EXAMPLES) if n[0] not in "._" and os.path.isdir(os.path.join(EXAMPLES, n))]
+    return sorted(names, key=lambda n: (n != "範例角色", n))
+
+
 def do_new_role(p: dict) -> dict:
-    """新增角色：照 examples\\範例角色 建一份（文字檔裡的「範例角色」／<角色> 換成新名字）。不覆寫既有資料夾。"""
+    """新增角色：照 examples\\<範本> 建一份（文字檔裡的範本名／<角色> 換成新名字；voice\\ 等子夾原樣複製）。不覆寫既有資料夾。"""
     name = safe_name(str(p.get("name") or "").strip())
     if name.startswith(".") or len(name) > 40:
         raise ValueError("角色名不能以 . 開頭、最多 40 字")
+    tpl = str(p.get("template") or "範例角色")
+    if tpl not in list_templates():
+        raise ValueError(f"沒有這個範本：{tpl}")
     d = os.path.join(LAB, name)
     if os.path.exists(d):
         raise ValueError(f"已經有這個角色：{name}")
+    src_dir = os.path.join(EXAMPLES, tpl)
     os.makedirs(d)
-    for f in os.listdir(TEMPLATE_DIR):
-        src = os.path.join(TEMPLATE_DIR, f)
-        if os.path.isfile(src):
-            _write_text(os.path.join(d, f), "\n".join(_read_lines(src)).replace("範例角色", name).replace("<角色>", name) + "\n")
+    for f in os.listdir(src_dir):
+        src, dst = os.path.join(src_dir, f), os.path.join(d, f)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst)
+        elif f.lower().endswith((".txt", ".md")):
+            _write_text(dst, "\n".join(_read_lines(src)).replace(tpl, name).replace("<角色>", name) + "\n")
+        else:
+            shutil.copy2(src, dst)
     return {"role": name}
+
+
+def do_samples(p: dict) -> dict:
+    """把 examples\\_範例音檔 的錄音複製進角色資料夾（已有同名就跳過），給後製／波形／A-B 試用。不拿來複製聲音。"""
+    d = role_dir(p.get("role", ""))
+    if not os.path.isdir(SAMPLES_DIR):
+        raise ValueError("找不到 examples\\_範例音檔")
+    copied = []
+    for f in list_audio(SAMPLES_DIR):
+        if not os.path.exists(os.path.join(d, f)):
+            shutil.copy2(os.path.join(SAMPLES_DIR, f), os.path.join(d, f))
+            copied.append(f)
+    return {"copied": copied, "all": list_audio(SAMPLES_DIR)}
 
 
 def do_comment(p: dict) -> dict:
@@ -666,7 +695,8 @@ TOKEN = secrets.token_urlsafe(16)
 ALLOWED_HOSTS = set()  # 綁好埠後填入；擋 DNS rebinding
 ROUTES = {"/api/dryrun": do_dryrun, "/api/generate": do_generate, "/api/preview": do_preview,
           "/api/save": do_save, "/api/comment": do_comment, "/api/design": do_design,
-          "/api/replicate": do_replicate, "/api/upload": do_upload, "/api/key": do_key, "/api/role": do_new_role}
+          "/api/replicate": do_replicate, "/api/upload": do_upload, "/api/key": do_key, "/api/role": do_new_role,
+          "/api/samples": do_samples}
 MIME = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".flac": "audio/flac", ".ogg": "audio/ogg",
         ".aac": "audio/aac"}
 MAX_BODY = UPLOAD_MAX * 4 // 3 + 65536  # base64 膨脹 4/3 ＋ JSON 其餘欄位
@@ -746,7 +776,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/ping":
             return self._send(200, {"ok": True})
         if u.path == "/api/roles":
-            return self._dispatch(lambda: {"roles": list_roles(), "lab": LAB, "has_key": has_key()})
+            return self._dispatch(lambda: {"roles": list_roles(), "lab": LAB, "has_key": has_key(), "templates": list_templates()})
         if u.path == "/api/state":
             return self._dispatch(get_state, q.get("role", ""))
         if u.path == "/api/voices":
@@ -1073,6 +1103,20 @@ def _check_http(tmp):
         for bad in ("新角色", "", "../x", "a\\b", ".hidden", "長" * 41):
             assert req("POST", "/api/role", {"name": bad})[0] == 400, bad
         shutil.rmtree(nr)  # 後面的自檢會數全部角色的額度
+        # 從別的範本建：子夾 voice\ 一起複製、範本名換成新名字、desc-0 當造聲描述預填；_ 開頭不是範本
+        tpls = req("GET", "/api/roles")[1]["templates"]
+        assert tpls[0] == "範例角色" and "_範例音檔" not in tpls and tpls == list_templates()
+        other = next((t for t in tpls if os.path.isdir(os.path.join(EXAMPLES, t, VOICE_SUB))), None)
+        if other:
+            assert req("POST", "/api/role", {"name": "旁白甲", "template": other})[0] == 200
+            s2 = req("GET", "/api/state?role=" + quote("旁白甲"))[1]
+            with open(os.path.join(EXAMPLES, other, VOICE_SUB, "desc-0.txt"), encoding="utf-8") as f:
+                assert s2["desc"] == f.read().strip() and s2["next_design"] == 1
+            assert s2["cues"].startswith("# 旁白甲") and other not in s2["cues"]
+            shutil.rmtree(os.path.join(tmp, "旁白甲"))
+        for bad in ("沒這個範本", "../範例角色", "_範例音檔"):
+            assert req("POST", "/api/role", {"name": "x", "template": bad})[0] == 400, bad
+        assert not os.path.exists(os.path.join(tmp, "x"))
         # 試切段：真跑 tts_gemini --dry-run（0 額度）；cues／styles 寫回檔
         form = {"role": role, "voice": "Sulafat", "model": "flash", "base": "calm",
                 "cues": "【平穩】\n你好啊。\n【停 1.0】\n【收尾】\n晚安。\n", "styles": "平穩: soft"}
@@ -1258,6 +1302,14 @@ def _check_http(tmp):
     assert req("GET", f"/audio/{quote(role)}/{quote(LAST_NAME)}")[0] == 404
     assert req("GET", "/audio/%2E%2E%2Fx/a.mp3")[0] == 400
     assert req("GET", f"/audio/{quote(role)}/..%5Cx.mp3")[0] == 400
+    # 放入範例音檔：複製 examples\_範例音檔 的錄音、第二次全部跳過、不搶輪次號
+    if os.path.isdir(SAMPLES_DIR):
+        want = list_audio(SAMPLES_DIR)
+        st, j = req("POST", "/api/samples", {"role": role})
+        assert st == 200 and j["copied"] == want and want, j
+        assert req("POST", "/api/samples", {"role": role})[1]["copied"] == []
+        s = state()
+        assert set(want) <= set(s["audio"]) and s["next"] == "r04"
     srv.shutdown()
     srv.server_close()
 

@@ -64,6 +64,7 @@ dialog::backdrop{background:rgba(0,0,0,.35)}
 <dialog id="ask"><form method="dialog">
   <p id="askmsg"></p>
   <input type="text" id="askin" hidden aria-label="輸入">
+  <label id="asksellabel" class="muted" hidden style="display:block;margin-top:8px">從哪個範本建 <select id="asksel"></select></label>
   <div class="askbtns"><button value="no">取消</button><button value="ok" class="go" id="askok">確定</button></div>
 </form></dialog>
 <main>
@@ -93,6 +94,7 @@ dialog::backdrop{background:rgba(0,0,0,.35)}
     <b>＋ 輸入聲音</b> <span class="muted">· 把錄音檔拖進視窗，或點這裡選檔（mp3／wav／m4a／flac／ogg／aac，手機錄音也行，可一次多個）</span>
     <div class="muted small" id="dropout">上傳後可在「後製」微調，或拿去「複製聲音」當參考音／授權句</div>
     <button id="goclone" style="margin-top:6px">複製聲音 ↓</button>
+    <button id="addsamples" style="margin-top:6px" title="把 examples\_範例音檔 的可商用錄音複製進這個角色，試後製／波形／A-B 用">放入範例音檔</button>
   </section>
   <input type="file" id="upfile" accept="audio/*,.m4a,.aac" multiple hidden>
   <div class="grid">
@@ -186,7 +188,7 @@ dialog::backdrop{background:rgba(0,0,0,.35)}
 const TOKEN = "__TOKEN__";
 const $ = id => document.getElementById(id);
 const KEYS = [["voice", "音色"], ["model", "模型"], ["base", "底色"], ["cues", "台詞"], ["styles", "風格表"]];
-let S = null;
+let S = null, TEMPLATES = ["範例角色"];
 
 async function api(path, body) {
   const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Token": TOKEN}, body: JSON.stringify(body)};
@@ -197,11 +199,14 @@ async function api(path, body) {
 }
 function err(e) { $("err").textContent = e ? String(e.message || e) : ""; }
 // 頁面自己的確認／輸入框：不靠 confirm()／prompt()（Edge 獨立視窗等環境可能不跳）
-function ask(msg, input) {
+function ask(msg, input, options) {  // options＝下拉選項（選到的值事後讀 $("asksel").value）
   const d = $("ask");
   $("askmsg").textContent = msg;
   $("askin").hidden = !input;
   $("askin").value = "";
+  $("asksellabel").hidden = !options;
+  $("asksel").innerHTML = "";
+  for (const o of options || []) $("asksel").add(new Option(o, o));
   d.returnValue = "";
   d.showModal();
   if (input) $("askin").focus();
@@ -425,6 +430,18 @@ async function uploadFiles(files) {
   $("dropout").textContent = `已上傳：${done.join("、")}——已選進「後製」來源，可以直接拉滑桿試聽；要複製聲音按下面「複製聲音 ↓」`;
 }
 $("drop").onclick = $("upbtn2").onclick = () => $("upfile").click();
+$("addsamples").onclick = async e => {
+  e.stopPropagation();  // 按鈕在輸入聲音區裡面：別讓它也開選檔視窗
+  if (!S) return err("先選角色");
+  err("");
+  try {
+    const j = await api("/api/samples", {role: role()});
+    await loadState();
+    if (j.all.length) { $("src").value = j.all[0]; loadSrc(); }
+    $("dropout").textContent = (j.copied.length ? `已放入 ${j.copied.length} 段範例音檔` : "範例音檔都已經在了")
+      + "：只供試聽與後製，不拿來複製聲音。來源與授權（CC0／CC BY-SA 4.0）見 examples\\_範例音檔\\來源與授權.md";
+  } catch (e2) { err(e2); }
+};
 $("goclone").onclick = e => {  // 按鈕在輸入聲音區裡面：別讓它也開選檔視窗
   e.stopPropagation();
   $("clonebox").scrollIntoView({behavior: "smooth", block: "center"});
@@ -503,11 +520,11 @@ $("theme").onchange = () => {
 };
 $("askin").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("ask").close("ok"); } };  // Enter＝確定（表單預設會按到第一顆「取消」）
 $("newrole").onclick = async () => {
-  const name = await ask("新角色的名字（會變成資料夾名，中文可以）", true);
+  const name = await ask("新角色的名字（會變成資料夾名，中文可以）", true, TEMPLATES);
   if (!name) return;
   err("");
   try {
-    await api("/api/role", {name});
+    await api("/api/role", {name, template: $("asksel").value || "範例角色"});
     try { localStorage.setItem("gvl-role", name); } catch {}
     location.reload();  // 重新整理就會選到新角色（角色清單、音色、狀態一次重載）
   } catch (e) { err(e); }
@@ -518,6 +535,7 @@ setInterval(() => fetch("/api/ping").catch(() => {}), 30000);  // 桌面捷徑�
     showFx();
     const r = await api("/api/roles");
     showKey(r.has_key);
+    if (r.templates && r.templates.length) TEMPLATES = r.templates;
     if (!r.has_key) $("keybox").open = true;  // 只在開啟時展開一次；只做後製的人可以收起來
     if (!r.roles.length) return err(`${r.lab} 底下還沒有角色：按上方「＋ 新增角色」建一個。`);
     for (const x of r.roles) $("role").add(new Option(x, x));
